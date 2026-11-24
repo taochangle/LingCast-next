@@ -21,6 +21,25 @@ JPEG = base64.b64encode(
 PCM = base64.b64encode(bytes(FRAMES * 1280)).decode()
 prepared = set()
 rendered = []
+host_line = "如果把树叶放在白纸上，细细看它边缘的起伏，会发现一片叶子也有自己的轮廓。换个方向再看，也许能找到另一种有趣的形状。"
+receipt_consumed = threading.Event()
+
+
+def completion(messages):
+    system, data = messages[0]["content"], json.loads(messages[1]["content"])
+    if "只读口播审核员" in system:
+        decision = {"allow": True, "category": "safe"}
+    elif "topics 为12个" in system:
+        decision = {"topics": [{"title": f"窗边观察{i}", "angles": ["轮廓", "色彩", "假设的场景"]} for i in range(12)], "suggestedInterests": ["日常观察"]}
+    elif data["source"] == "interaction":
+        decision = {"action": "speak", "text": "我喜欢浅绿色，柔和又明亮。"}
+    elif any(turn["text"] == host_line and turn["source"] == "host" for turn in data["spokenTurns"]):
+        receipt_consumed.set()
+        decision = {"action": "skip"}
+    else:
+        decision = {"action": "speak", "text": host_line}
+    return {"choices": [{"message": {"content": json.dumps(decision, ensure_ascii=False)}}]}
+
 lock = threading.Lock()
 
 
@@ -53,12 +72,15 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json({"profiles": {VOICE: "fixture"}})
         if self.server.role == "renderer" and self.path == "/observed":
             with lock:
-                return self.send_json({"texts": list(rendered)})
+                return self.send_json({"texts": list(rendered), "hostReceiptConsumed": receipt_consumed.is_set()})
         return self.send_json({"error": "not found"}, 404)
 
     def do_POST(self):
         if not self.authorized():
             return self.send_json({"error": "unauthorized"}, 401)
+        if self.server.role == "llm" and self.path == "/chat/completions":
+            payload = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            return self.send_json(completion(payload["messages"]))
         if self.server.role != "renderer":
             return self.send_json({"error": "not found"}, 404)
         body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
@@ -99,6 +121,8 @@ def fixture(port, role, token):
 
 
 if __name__ == "__main__":
+    llm = fixture(8093, "llm", os.environ["LLM_TOKEN"])
+    threading.Thread(target=llm.serve_forever, daemon=True).start()
     tts = fixture(8091, "tts", os.environ["TTS_TOKEN"])
     threading.Thread(target=tts.serve_forever, daemon=True).start()
     fixture(8092, "renderer", os.environ["LIPSYNC_TOKEN"]).serve_forever()

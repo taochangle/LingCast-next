@@ -255,6 +255,22 @@ def verify():
         flush=True,
     )
 
+    # Go only includes a spoken turn in the next model request after it
+    # consumes a completed receipt from the real Python Worker.
+    request(app, f"{live_path}/host", 200, admin, "PATCH", {"enabled": True})
+    def completed_text(value):
+        results = request(worker, f"/sessions/{sid}/task-results?after=0", 200, worker_token)
+        return any(row["state"] == "completed" and row["text"] == value for row in results["results"])
+
+    host_line = "如果把树叶放在白纸上，细细看它边缘的起伏，会发现一片叶子也有自己的轮廓。换个方向再看，也许能找到另一种有趣的形状。"
+    eventually(lambda: completed_text(host_line))
+    eventually(lambda: request(fixture, "/observed", 200, model_token)["hostReceiptConsumed"])
+    comment = dict(event, events=[{"id": "fixture-question", "kind": "comment", "nickname": "合成观众", "text": "你喜欢什么颜色？"}])
+    ack = request(app, "/api/collector/events", 200, collector, "POST", comment)
+    assert ack["processedIds"] == ["fixture-question"] and ack["retryIds"] == []
+    eventually(lambda: completed_text("我喜欢浅绿色，柔和又明亮。"))
+    print("Autonomous speech, Go receipt consumption and audited viewer reply verified", flush=True)
+
     assert request(app, f"{live_path}/stop", 200, admin, "POST")["status"] == "stopped"
     assert request(app, "/api/live", 200, admin)["session"] is None
     assert request(worker, "/status", 200, worker_token)["status"] == "stopped"

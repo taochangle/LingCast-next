@@ -8,7 +8,7 @@ export APP_BIND_ADDRESS=127.0.0.1 APP_HOST_PORT=0
 export WORKER_BIND_ADDRESS=127.0.0.1 WORKER_HOST_PORT=0
 export PUBLIC_BASE_URL=http://app:8080 WORKER_URL=http://worker:8090
 export TTS_URL=http://fixture:8091 LIPSYNC_URL=http://fixture:8092
-export LLM_URL='' LLM_MODEL='' COMPOSE_PROFILES=''
+export LLM_URL=http://fixture:8093 LLM_MODEL=synthetic COMPOSE_PROFILES=''
 export TIMEZONE=Asia/Shanghai WORKER_START_TIMEOUT=30s
 for variable in ADMIN_TOKEN MEDIA_TOKEN WORKER_TOKEN TTS_TOKEN LIPSYNC_TOKEN LLM_TOKEN; do
     export "$variable=$(python3 -c 'import secrets; print(secrets.token_hex(24))')"

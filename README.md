@@ -67,3 +67,11 @@ Go 的 `app-data` 卷保存 SQLite 和上传文件，`musetalk-cache` 卷保存�
 插件安装与采集请见 [Chrome 插件说明](extensions/chrome/README.md)。使用当场的采集令牌，停播后令牌失效。
 
 `./scripts/check-compose.sh` 验证部署组合配置，`./scripts/smoke-compose.sh` 启动隔离的 CPU Compose 联调。CPU 联调需要宿主机 Python 3、FFmpeg 和 Docker，使用合成推理响应、临时卷及本机回环端口。当前验收结果和目标硬件步骤见 [验收记录](docs/acceptance.md)。
+
+## 陪伴主持
+
+在人物设置中填写人设和兴趣，在话术页生成主题。每批 12 个主题，生成和审核通过后即可使用，也可以编辑标题、调整角度或禁用主题。兴趣留空时可采纳系统建议。新人物默认使用陪伴主持，旧人物沿用固定稿。陪伴模式需要可用的 `LLM_URL`、`LLM_MODEL` 和 `LLM_TOKEN`。
+
+在直播台选择人物、形象、平台和主持模式。开播后点主持开关开始自主口播。没有互动时主持会沿当前主题展开，收到评论时优先处理互动。人工插播和已配置的固定稿按原文播放。主持开关可暂停或恢复，已经送入 Worker 的小段可以自然播完。主题按库存自动补充，满一小时后仍可继续，结束直播需手动停播。遇到「主持降级」时，检查模型配置和连通性，后台会按退避时间重试。
+
+接口、回执和内容限制见 [API 契约](docs/contracts.md)。CPU 模拟、浏览器和本地推流的证据，以及真实 GPU 听感验收状态见 [陪伴主持验收记录](docs/verification/companion-host/README.md)。

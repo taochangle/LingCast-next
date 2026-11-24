@@ -3,6 +3,7 @@ services:
     image: ${SMOKE_PROJECT:?Set SMOKE_PROJECT}-worker
     command: ["python", "/fixture/fake_models.py"]
     environment:
+      LLM_TOKEN: ${LLM_TOKEN:?Set LLM_TOKEN}
       TTS_TOKEN: ${TTS_TOKEN:?Set TTS_TOKEN}
       LIPSYNC_TOKEN: ${LIPSYNC_TOKEN:?Set LIPSYNC_TOKEN}
     volumes:

@@ -96,11 +96,11 @@
 
 **Interfaces:** 产出上述 HostInput/HostTopic/HostDraft/SafetyDecision 与 `CheckGeneratedSpeech`；`LoadHostContext(avatarID,sessionID string) (HostInput,error)`；`RecordPlayed(sessionID string,result TaskResult) error`。具体 SQL 表：host_topics、host_runs、host_turns；新表含 schema_version 或通过现有 additive migration 管理，不清空旧 objects/events。
 
-- [ ] 写失败测试 `TestHostConfigMigration`：旧人物默认 fixed，已有原文不变；兴趣数量/长度非法返回400；旧数据无损。`TestTrustBoundary`：昵称伪装 system、评论含消息 JSON、带 URL/编码载荷不能改变 messages 角色或触发联网；注入输入不进入可信配置。
-- [ ] 在 `backend/` 跑 `go test ./internal/app -run 'TestHostConfigMigration|TestTrustBoundary' -v`，先确认预期功能缺失失败。
-- [ ] 实现类型、增量迁移、显式可信 system 消息＋不可信 JSON 数据消息、长度限制及无 tools 的请求构造；输出只解析预定结构，拒绝多余操作字段。`CheckGeneratedSpeech` 的审核调用使用独立只读提示及严格枚举，超时/解析失败返回不允许。
-- [ ] 增加 `TestGeneratedSpeechFailClosed`：假 LLM 输出变更配置、回显提示词/密钥探测、审核超时/无效 JSON 均不得进入 Worker；正常短段可通过。测试使用本地假 LLM，不把真实密钥送入模型。
-- [ ] 重跑以上测试，通过后提交 `feat: add companion content storage and trust boundaries`。
+- [x] 写失败测试 `TestHostConfigMigration`：旧人物默认 fixed，已有原文不变；兴趣数量/长度非法返回400；旧数据无损。`TestTrustBoundary`：昵称伪装 system、评论含消息 JSON、带 URL/编码载荷不能改变 messages 角色或触发联网；注入输入不进入可信配置。
+- [x] 在 `backend/` 跑 `go test ./internal/app -run 'TestHostConfigMigration|TestTrustBoundary' -v`，先确认预期功能缺失失败。
+- [x] 实现类型、增量迁移、显式可信 system 消息＋不可信 JSON 数据消息、长度限制及无 tools 的请求构造；输出只解析预定结构，拒绝多余操作字段。`CheckGeneratedSpeech` 的审核调用使用独立只读提示及严格枚举，超时/解析失败返回不允许。
+- [x] 增加 `TestGeneratedSpeechFailClosed`：假 LLM 输出变更配置、回显提示词/密钥探测、审核超时/无效 JSON 均不得进入 Worker；正常短段可通过。测试使用本地假 LLM，不把真实密钥送入模型。
+- [x] 重跑以上测试，通过后提交 `feat: add companion content storage and trust boundaries`。
 
 ## Task 2: Worker 播放终态与 Go 幂等记忆
 
@@ -108,11 +108,11 @@
 
 **Interfaces:** 产出上述 task-results REST 与 `RecordPlayed`，提供给 Task 4/5；seq 在会话内单调，停止后旧 session 路由拒绝访问。仅记录成功的原任务最后一段，不把分段误判为整稿完成。
 
-- [ ] 写 `test_result_only_after_final_segment`、`test_failed_or_cancelled_not_completed`、`test_results_bounded_and_session_scoped`：分段只最终生成 completed；失败不为 completed；最多256条且 after 缺口 truncated=true；旧会话不可读。
-- [ ] 运行 `python -m unittest worker.tests.test_task_results -v`，确认失败。
-- [ ] 在 session 锁内写入有界终态环，HTTP 仅认证读取；Go 按 taskId 幂等存储，成功回执才更新话题角度/已播记录，failed/unknown 仅诊断。手动稿/固定稿照原文处理，人工稿不进入自动主题跨场去重。
-- [ ] 写 `TestPlayedReceiptIdempotent`、`TestMissingReceiptDoesNotAdvanceTopic`：重放回执无重复记忆，丢回执或部分输出不推进角度；Go 重启可从数据库恢复游标并识别缺口。
-- [ ] 跑 Python 新测试及 Go 对应测试，通过后提交 `feat: report bounded task playback outcomes`。
+- [x] 写 `test_result_only_after_final_segment`、`test_failed_or_cancelled_not_completed`、`test_results_bounded_and_session_scoped`：分段只最终生成 completed；失败不为 completed；最多256条且 after 缺口 truncated=true；旧会话不可读。
+- [x] 运行 `python -m unittest worker.tests.test_task_results -v`，确认失败。
+- [x] 在 session 锁内写入有界终态环，HTTP 仅认证读取；Go 按 taskId 幂等存储，成功回执才更新话题角度/已播记录，failed/unknown 仅诊断。手动稿/固定稿照原文处理，人工稿不进入自动主题跨场去重。
+- [x] 写 `TestPlayedReceiptIdempotent`、`TestMissingReceiptDoesNotAdvanceTopic`：重放回执无重复记忆，丢回执或部分输出不推进角度；Go 重启可从数据库恢复游标并识别缺口。
+- [x] 跑 Python 新测试及 Go 对应测试，通过后提交 `feat: report bounded task playback outcomes`。
 
 ## Task 3: 自动主题储备与短段生成
 
@@ -120,11 +120,11 @@
 
 **Interfaces:** 实现 `BuildTopics`、`BuildHostDraft`；提供主题 API；主题补充与短段生成调用 Task 1 的校验入口。所有 LLM 网络请求在全局 a.mu 之外，写入前重验管理员修订/人物/会话身份。
 
-- [ ] 写 `TestTopicReserveRefill`：12主题、<4补充、最多36、同人物生成单飞、取消后无落库；`TestHostDraftBoundsAndDedup`：40～120字符、1～3句、重复和非法 JSON 不入池，近似阈值0.75；`TestRecentTopicsExpire`：7天/200主题/100段界限及清理无跨人物误删。
-- [ ] 跑 `go test ./internal/app -run 'TestTopicReserveRefill|TestHostDraftBoundsAndDedup|TestRecentTopicsExpire' -v`，确认失败。
-- [ ] 实现生成、规范化/近似去重、主题和角度有界结构及管理员编辑 API；库存不足可按当前主题其他未讲角度继续，不能无限重讲已讲角度。生成失败按5/15/30/60秒退避，不能每秒重试。
-- [ ] 增加 `TestUnverifiedFactsNotBroadcast`：自动素材中的虚假新闻/具体天气/无来源数据经审核拒绝，模型建议访问链接不会触发网络请求；模型生成素材仍按不可信数据使用。
-- [ ] 测试通过后提交 `feat: generate reusable companion topic reserves`。
+- [x] 写 `TestTopicReserveRefill`：12主题、<4补充、最多36、同人物生成单飞、取消后无落库；`TestHostDraftBoundsAndDedup`：40～120字符、1～3句、重复和非法 JSON 不入池，近似阈值0.75；`TestRecentTopicsExpire`：7天/200主题/100段界限及清理无跨人物误删。
+- [x] 跑 `go test ./internal/app -run 'TestTopicReserveRefill|TestHostDraftBoundsAndDedup|TestRecentTopicsExpire' -v`，确认失败。
+- [x] 实现生成、规范化/近似去重、主题和角度有界结构及管理员编辑 API；库存不足可按当前主题其他未讲角度继续，不能无限重讲已讲角度。生成失败按5/15/30/60秒退避，不能每秒重试。
+- [x] 增加 `TestUnverifiedFactsNotBroadcast`：自动素材中的虚假新闻/具体天气/无来源数据经审核拒绝，模型建议访问链接不会触发网络请求；模型生成素材仍按不可信数据使用。
+- [x] 测试通过后提交 `feat: generate reusable companion topic reserves`。
 
 ## Task 4: 连贯主持调度、留白与生命周期
 
@@ -132,11 +132,11 @@
 
 **Interfaces:** `CompanionTick(ctx context.Context,sessionID string) error`；`InvalidateHostDraft(sessionID string,reason string)`；`CompanionStatus(sessionID string) HostStatus`。复用 Task 2 回执和 Task 3 生成；保留 fixed 原调度分支。
 
-- [ ] 写 `TestCompanionFlow`：空闲生成/校验/入队/完成/推进下一角度；没有回执不推进。`TestHostPauseTiming`：注入时钟/随机源验证2～5秒、5～10秒和长安静10～20秒；不忙等、不每tick刷新截止时间。
-- [ ] 跑上述 Go 测试确认失败。
-- [ ] 实现本场 revision 与取消上下文、单生成/单缓存、固定模式回退及状态；提交前再核对 session/status/hostEnabled/revision/队列。暂停废弃未提交草稿，已进入Worker的小段允许自然播完；停播不能被 LLM 请求阻塞。
-- [ ] 增加 `TestLateGenerationCannotCrossSession`、`TestSlowLLMDoesNotBlockStop`、`TestManualStopAfterHour`、`TestRestartDoesNotReplayUnknown`：暂停/停止/换会话时旧结果丢弃；65分钟仍可主持且没有自动告别；重启不重播未确认段；错误期间保持idle并呈现 degraded。
-- [ ] 测试通过后提交 `feat: schedule coherent companion speech with natural pauses`。
+- [x] 写 `TestCompanionFlow`：空闲生成/校验/入队/完成/推进下一角度；没有回执不推进。`TestHostPauseTiming`：注入时钟/随机源验证2～5秒、5～10秒和长安静10～20秒；不忙等、不每tick刷新截止时间。
+- [x] 跑上述 Go 测试确认失败。
+- [x] 实现本场 revision 与取消上下文、单生成/单缓存、固定模式回退及状态；提交前再核对 session/status/hostEnabled/revision/队列。暂停废弃未提交草稿，已进入Worker的小段允许自然播完；停播不能被 LLM 请求阻塞。
+- [x] 增加 `TestLateGenerationCannotCrossSession`、`TestSlowLLMDoesNotBlockStop`、`TestManualStopAfterHour`、`TestRestartDoesNotReplayUnknown`：暂停/停止/换会话时旧结果丢弃；65分钟仍可主持且没有自动告别；重启不重播未确认段；错误期间保持idle并呈现 degraded。
+- [x] 测试通过后提交 `feat: schedule coherent companion speech with natural pauses`。
 
 ## Task 5: 互动接话、回到话题与攻击回归
 
@@ -144,11 +144,11 @@
 
 **Interfaces:** `BuildInteractionReply(ctx context.Context,input HostInput,event ViewerTurn) (ReplyDecision,error)`；`ReplyDecision{action:speak|skip,text}`。观众无稳定身份契约，不构建跨场个人档案。`OnViewerTurn(sessionID string,event ViewerTurn)` 仅使未提交自主草稿失效，不写可信人设。
 
-- [ ] 写 `TestInteractionContinuesTopic`：评论接话→连续追问→安静后自然延续，输入含已播上下文及可信服务器时间；固定评论稿仍按原文且不因新模式被重写。`TestCommentStormBounded`：最多20条短期上下文；等待超过30秒的普通评论不再生成答复；现有插件 processed/retry 与事件去重契约不破坏。
-- [ ] 跑新测试确认失败。
-- [ ] 实现事件入站限制、每场最多1个互动LLM在途（后台待处理FIFO最多20条，满则明确skip并完成事件，不制造无限retry），优先真实互动；昵称只作称呼数据，不能作为系统角色。事件超时/skip记为已处理但不记为已播，失败重试仍沿用原稳定 taskId。
-- [ ] 建立表驱动攻击集 `TestPromptAttackCorpus`：忽略前令、伪系统/管理员、昵称攻击、多语种、编码要求、引用嵌套、多轮污染、要求泄露提示词/配置、生成素材注入。断言角色/权限不变、未授权输出被阻断、攻击原文不进后续主题/可信记忆；不要求某一句固定拒绝文案。
-- [ ] 加 `TestTimeCannotBeOverriddenByComment` 和 `TestFixedScriptsRemainVerbatim`，验证用户声称的时间不能覆盖服务器时间、现有欢迎礼物/人工稿保持原文；测试通过后提交 `feat: integrate safe contextual viewer conversations`。
+- [x] 写 `TestInteractionContinuesTopic`：评论接话→连续追问→安静后自然延续，输入含已播上下文及可信服务器时间；固定评论稿仍按原文且不因新模式被重写。`TestCommentStormBounded`：最多20条短期上下文；等待超过30秒的普通评论不再生成答复；现有插件 processed/retry 与事件去重契约不破坏。
+- [x] 跑新测试确认失败。
+- [x] 实现事件入站限制、每场最多1个互动LLM在途（后台待处理FIFO最多20条，满则明确skip并完成事件，不制造无限retry），优先真实互动；昵称只作称呼数据，不能作为系统角色。事件超时/skip记为已处理但不记为已播，失败重试仍沿用原稳定 taskId。
+- [x] 建立表驱动攻击集 `TestPromptAttackCorpus`：忽略前令、伪系统/管理员、昵称攻击、多语种、编码要求、引用嵌套、多轮污染、要求泄露提示词/配置、生成素材注入。断言角色/权限不变、未授权输出被阻断、攻击原文不进后续主题/可信记忆；不要求某一句固定拒绝文案。
+- [x] 加 `TestTimeCannotBeOverriddenByComment` 和 `TestFixedScriptsRemainVerbatim`，验证用户声称的时间不能覆盖服务器时间、现有欢迎礼物/人工稿保持原文；测试通过后提交 `feat: integrate safe contextual viewer conversations`。
 
 ## Task 6: 运营者设置、主题管理与主持状态
 
@@ -156,10 +156,10 @@
 
 **Interfaces:** 消费上述 avatar配置、主题和 host-status API；`HostContentManager({avatarId:string})` 管主题与兴趣；`HostStatus({sessionId:string})` 展示当前话题/准备/暂停/降级，不假报真人观众数或播放成功。
 
-- [ ] 写测试：旧人物固定模式、选择陪伴模式、修改兴趣、主题自动补充/生成中/失败重试、禁用主题、401/409/503中文提示；切人物/切会话时晚响应不能覆盖当前状态。
-- [ ] 在 `frontend/` 跑 `npm test -- --run` 确认新增功能测试失败。
-- [ ] 在现有人物/话术区域增加模式和兴趣、主题列表，不重做导航；保留原文稿管理。直播区只增加当前话题和真实状态，暂停/恢复沿用原控件，错误不暴露提示词或内部token。
-- [ ] 测试通过后 `npm run build`；浏览器检查1440桌面和390手机、空主题/降级/长标题，保存关键截图，再提交 `feat: manage companion topics and hosting status`。
+- [x] 写测试：旧人物固定模式、选择陪伴模式、修改兴趣、主题自动补充/生成中/失败重试、禁用主题、401/409/503中文提示；切人物/切会话时晚响应不能覆盖当前状态。
+- [x] 在 `frontend/` 跑 `npm test -- --run` 确认新增功能测试失败。
+- [x] 在现有人物/话术区域增加模式和兴趣、主题列表，不重做导航；保留原文稿管理。直播区只增加当前话题和真实状态，暂停/恢复沿用原控件，错误不暴露提示词或内部token。
+- [x] 测试通过后 `npm run build`；浏览器检查1440桌面和390手机、空主题/降级/长标题，保存关键截图，再提交 `feat: manage companion topics and hosting status`。
 
 ## Task 7: 契约、长时模拟与真实听感验收
 
@@ -167,12 +167,12 @@
 
 **Interfaces:** 汇总前六项，更新请求/响应示例、状态含义、错误恢复、fixed/companion迁移行为、无审核直接使用与安全限制。不修改模型端NDJSON/时钟协议。
 
-- [ ] 先写 `TestCompanionSoak90Minutes`：假时钟90分钟、多个主题、无人互动/互动突发/暂停恢复/生成失败/回执缺口，断言不自动结束、不短期重复、各缓存及LLM并发有界、重试有退避、只有成功输出推进记忆；纯模拟不能拿来宣称真实播放90分钟。
-- [ ] 跑失败测试，再补齐发现的集成缺口，更新契约和操作说明。
-- [ ] 完整验证：`cd backend && go test -race ./... && go vet ./...`；根目录 `python -m unittest discover -s worker/tests -v`；`cd frontend && npm test -- --run && npm run build`；根目录 `bash scripts/check-compose.sh`。所有失败修正后再进入真实验收。
+- [x] 先写 `TestCompanionSoak90Minutes`：假时钟90分钟、多个主题、无人互动/互动突发/暂停恢复/生成失败/回执缺口，断言不自动结束、不短期重复、各缓存及LLM并发有界、重试有退避、只有成功输出推进记忆；纯模拟不能拿来宣称真实播放90分钟。
+- [x] 跑失败测试，再补齐发现的集成缺口，更新契约和操作说明。
+- [x] 完整验证：`cd backend && go test -race ./... && go vet ./...`；根目录 `python -m unittest discover -s worker/tests -v`；`cd frontend && npm test -- --run && npm run build`；根目录 `bash scripts/check-compose.sh`。所有失败修正后再进入真实验收。
 - [ ] 用户GPU和idle就绪后另行实测：先听10分钟无人互动，再用本地模拟事件做10分钟接话/插播，最后真实连续运行至少60分钟。记录停顿、首句等待、接话延迟、复读次数、人物一致性、音画衔接和失败恢复；不自动向平台发评论，不启用外部转推。
-- [ ] 如提示注入导致不当口播，记录攻击类别/是否进入记忆和可重复fixture，不保存真实敏感数据；修复后重跑攻击集。审核拒绝过多也要调规则，不能以长时间沉默当作功能通过。
-- [ ] 记录实测通过项与未验证项，提交 `test: verify long-running companion host behavior`。
+- [x] 如提示注入导致不当口播，记录攻击类别/是否进入记忆和可重复fixture，不保存真实敏感数据；修复后重跑攻击集。审核拒绝过多也要调规则，不能以长时间沉默当作功能通过。
+- [x] 记录实测通过项与未验证项，提交 `test: verify long-running companion host behavior`。
 
 ## 实施顺序与审阅
 
@@ -187,3 +187,5 @@
 - 现有「生成无记忆、固定5秒轮播、Worker仅lastTaskCompletedAt」均有对应替换/增量任务。
 - 未包含：网页检索/热点新闻、观众长期画像、自动开停播、动作生成、换形象、新模型部署、GPU配置变更。
 - 人物兴趣、主题数量、段长、留白、去重阈值与审核策略均为本计划建议值，等待用户审阅；实际自然度不能仅凭文本或CPU测试确认。
+
+2026-11-24 执行结果见[验收记录](../../verification/companion-host/README.md)。真实 GPU 与听感验收待设备和 idle 就绪；模型攻击集已用本地合成 fixture 验证，真实模型误报、漏报和沉默时长仍待测。
