@@ -4,13 +4,16 @@ ARG APT_MIRROR=https://mirrors.tuna.tsinghua.edu.cn
 COPY deploy/configure-apt.sh /tmp/configure-apt.sh
 RUN sh /tmp/configure-apt.sh "${APT_MIRROR}" \
     && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    python3.10 python3.10-venv git ffmpeg libsndfile1 libgl1 libglib2.0-0 ca-certificates \
+    python3.10 python3.10-venv ffmpeg libsndfile1 libgl1 libglib2.0-0 ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 RUN python3.10 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:${PATH}" PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
-RUN git init /opt/MuseTalk && git -C /opt/MuseTalk remote add origin https://github.com/TMElyralab/MuseTalk.git \
-    && git -C /opt/MuseTalk fetch --depth=1 origin 0a89dec45a0192b824e3cf4daf96c239440c5ed8 \
-    && git -C /opt/MuseTalk checkout --detach FETCH_HEAD
+COPY vendor/sources/ /tmp/sources/
+RUN cd /tmp/sources && sha256sum -c SHA256SUMS \
+    && mkdir -p /opt/MuseTalk \
+    && tar -xzf musetalk-0a89dec45a0192b824e3cf4daf96c239440c5ed8.tar.gz --strip-components=1 -C /opt/MuseTalk \
+    && printf '%s\n' 0a89dec45a0192b824e3cf4daf96c239440c5ed8 > /opt/MuseTalk/SOURCE_REVISION \
+    && rm -rf /tmp/sources
 COPY services/lipsync/*requirements.txt /tmp/lipsync/
 ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
 ARG PYTORCH_CU118_INDEX_URL=https://mirror.sjtu.edu.cn/pytorch-wheels/cu118

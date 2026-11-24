@@ -1,0 +1,44 @@
+[
+  {
+    "archive": "cosyvoice-074ca6dc9e80a2f424f1f74b48bdd7d3fea531cc.tar.gz",
+    "originalArchiveSha256": "10c587f0853db27667a64a0a2dc0788b1c782cdab223682691db78702082a550",
+    "archiveSha256": "7fce5d3005153611bef288351ee50649a49538d13fbe4e6ebd03c7a8ba12bdde",
+    "excludedTopLevel": [
+      "asset",
+      "assets",
+      "data",
+      ".github"
+    ],
+    "excludedSuffix": [
+      ".ipynb"
+    ]
+  },
+  {
+    "archive": "matcha-tts-dd9105b34bf2be2230f4aa1e4769fb586a3c824e.tar.gz",
+    "originalArchiveSha256": "59c43afae79110e4057eaa43f45b5558b556435da8fc85eab83f0c819ba3358d",
+    "archiveSha256": "249f8d755d845b2c210c78cac29ded44ecc36d0649857b0b03e34ef3e929413b",
+    "excludedTopLevel": [
+      "asset",
+      "assets",
+      "data",
+      ".github"
+    ],
+    "excludedSuffix": [
+      ".ipynb"
+    ]
+  },
+  {
+    "archive": "musetalk-0a89dec45a0192b824e3cf4daf96c239440c5ed8.tar.gz",
+    "originalArchiveSha256": "2e1685e4bcc58531c5118c0ba485199f22012016ed4608cab725a51d131f7ca7",
+    "archiveSha256": "527bd20237260c8e7ac63b6ea0088f39e7eb98bedea047c08fd011a650db800d",
+    "excludedTopLevel": [
+      "asset",
+      "assets",
+      "data",
+      ".github"
+    ],
+    "excludedSuffix": [
+      ".ipynb"
+    ]
+  }
+]

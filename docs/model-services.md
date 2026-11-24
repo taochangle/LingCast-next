@@ -22,7 +22,7 @@ Worker installs `worker/requirements.txt` plus FFmpeg/ffprobe; Python3.12 on Lin
 
 Build sources are configurable in `.env`: `DOCKER_IMAGE_PREFIX=docker.1ms.run/` by default in the template; empty or omitted means official Docker Hub when using Compose. `PIP_INDEX_URL` defaults to TUNA, and `PYTORCH_CU121_INDEX_URL` / `PYTORCH_CU118_INDEX_URL` default to SJTUG's matching CUDA indexes. `MMCV_WHEEL_INDEX_URL` selects the exact cu118/torch2.0 wheel directory. These change build-time download locations, not pinned package/source versions or model mounts. No generic mirror silently replaces a CUDA-specific index.
 
-Already copied weights require no download flag: set `COSYVOICE_WEIGHTS_DIR` and `MUSETALK_WEIGHTS_DIR` to the full local trees and skip manual weight-download commands. Startup remains offline, absent files fail readiness, and Docker builds exclude host `models/`. Source checkouts and Python dependency installation are still necessary when building an image for the first time.
+Already copied weights require no download flag: set `COSYVOICE_WEIGHTS_DIR` and `MUSETALK_WEIGHTS_DIR` to the full local trees and skip manual weight-download commands. Startup remains offline, absent files fail readiness, and Docker builds exclude host `models/`. Fixed source bundles are shipped under `vendor/sources/`; Docker verifies and extracts them without Git or network source checkout. Python dependencies still install from configured package repositories.
 
 Sources were verified against actual upstream files, not invented revisions:
 
@@ -32,17 +32,21 @@ Sources were verified against actual upstream files, not invented revisions:
 
 Model images need **Python3.10**, independently of Worker3.12. MuseTalk's pinned README recommends torch2.0.1/torchvision0.15.2/torchaudio2.0.2 CUDA11.8 and mmcv2.0.1/mmdet3.1.0/mmpose1.1.0. Install torch wheels from the configured cu118 index (SJTUG by default; official fallback `https://download.pytorch.org/whl/cu118`) and mmcv from matching torch2.0/cu118 wheel index; a CPU mmcv wheel cannot serve this model. Its numpy1.23.5 and TensorFlow2.12 pin rule out blindly using Worker Python3.12. CosyVoice independently pins torch2.3.1/torchaudio2.3.1 and CUDA12.1 index, with deepspeed0.15.1 and TensorRT10.13.3.9. Its requirements need build tools/CUDA toolchain; do not install both sets into one environment. Preserve source submodules recursively at their pinned gitlinks. No image build or NVIDIA installation has yet been validated on Linux x86_64.
 
-Example explicit source acquisition, performed by the operator/build only:
+Source acquisition is a maintainer operation, outside the target Docker build.
+The repository already includes the bundles; an operator does not need to clone
+the upstream repositories. The pinned codeload sources are:
 
 ```sh
-git clone https://github.com/FunAudioLLM/CosyVoice.git /opt/CosyVoice
-git -C /opt/CosyVoice checkout --detach 074ca6dc9e80a2f424f1f74b48bdd7d3fea531cc
-git -C /opt/CosyVoice submodule update --init --recursive
-git clone https://github.com/TMElyralab/MuseTalk.git /opt/MuseTalk
-git -C /opt/MuseTalk checkout --detach 0a89dec45a0192b824e3cf4daf96c239440c5ed8
+https://codeload.github.com/FunAudioLLM/CosyVoice/tar.gz/074ca6dc9e80a2f424f1f74b48bdd7d3fea531cc
+https://codeload.github.com/shivammehta25/Matcha-TTS/tar.gz/dd9105b34bf2be2230f4aa1e4769fb586a3c824e
+https://codeload.github.com/TMElyralab/MuseTalk/tar.gz/0a89dec45a0192b824e3cf4daf96c239440c5ed8
 ```
 
-The explicit clones are not service-start behavior. Source hashes lock source and direct requirements; they are not a complete transitive Python package lock or model-weight checksum lock. A production image must be built and recorded on target NVIDIA hardware before release.
+Bundle contents, omitted demo material, original and repacked checksums are
+documented in `vendor/sources/`. Source revisions lock source and direct
+requirements; they are not a complete transitive Python package lock or
+model-weight checksum lock. A production image must be built and recorded on
+target NVIDIA hardware before release.
 
 ## External assets and mounts
 

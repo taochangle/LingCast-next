@@ -4,15 +4,18 @@ ARG APT_MIRROR=https://mirrors.tuna.tsinghua.edu.cn
 COPY deploy/configure-apt.sh /tmp/configure-apt.sh
 RUN sh /tmp/configure-apt.sh "${APT_MIRROR}" \
     && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    python3.10 python3.10-dev python3.10-venv git ffmpeg libsndfile1 libgl1 libglib2.0-0 \
+    python3.10 python3.10-dev python3.10-venv ffmpeg libsndfile1 libgl1 libglib2.0-0 \
     build-essential ca-certificates && rm -rf /var/lib/apt/lists/*
 RUN python3.10 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:${PATH}" PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
-RUN git init /opt/CosyVoice && git -C /opt/CosyVoice remote add origin https://github.com/FunAudioLLM/CosyVoice.git \
-    && git -C /opt/CosyVoice fetch --depth=1 origin 074ca6dc9e80a2f424f1f74b48bdd7d3fea531cc \
-    && git -C /opt/CosyVoice checkout --detach FETCH_HEAD \
-    && git -C /opt/CosyVoice submodule update --init --recursive --depth=1 \
-    && test "$(git -C /opt/CosyVoice/third_party/Matcha-TTS rev-parse HEAD)" = dd9105b34bf2be2230f4aa1e4769fb586a3c824e
+COPY vendor/sources/ /tmp/sources/
+RUN cd /tmp/sources && sha256sum -c SHA256SUMS \
+    && mkdir -p /opt/CosyVoice/third_party/Matcha-TTS \
+    && tar -xzf cosyvoice-074ca6dc9e80a2f424f1f74b48bdd7d3fea531cc.tar.gz --strip-components=1 -C /opt/CosyVoice \
+    && tar -xzf matcha-tts-dd9105b34bf2be2230f4aa1e4769fb586a3c824e.tar.gz --strip-components=1 -C /opt/CosyVoice/third_party/Matcha-TTS \
+    && printf '%s\n' 074ca6dc9e80a2f424f1f74b48bdd7d3fea531cc > /opt/CosyVoice/SOURCE_REVISION \
+    && printf '%s\n' dd9105b34bf2be2230f4aa1e4769fb586a3c824e > /opt/CosyVoice/third_party/Matcha-TTS/SOURCE_REVISION \
+    && rm -rf /tmp/sources
 COPY services/tts/*requirements.txt /tmp/tts/
 ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
 ARG PYTORCH_CU121_INDEX_URL=https://mirror.sjtu.edu.cn/pytorch-wheels/cu121

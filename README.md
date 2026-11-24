@@ -76,9 +76,9 @@ Ubuntu/Debian 的系统包安装前统一改用 `APT_MIRROR`，Alpine 用 `APK_M
 
 **已手动复制模型：直接跳过下面第 2 步的下载。** 在 `.env` 中设置 `COSYVOICE_WEIGHTS_DIR` 和 `MUSETALK_WEIGHTS_DIR` 指向完整权重目录即可；默认分别是 `./models/cosyvoice` 和 `./models/musetalk`。这些目录作为宿主机挂载使用，不进入 Docker 构建上下文，构建和启动均不下载权重，因此不需要 `SKIP_MODEL_DOWNLOAD` 开关。仍需准备第 3 步的音色参考数据，并使用 `--profile models` 启动本地模型服务。
 
-Dockerfile 中的 Git 克隆是固定版本的推理程序源码，pip 安装是运行依赖，二者都不是模型权重。复制了权重后，首次构建仍需完成这两项；已有构建好的镜像时可以通过 `docker compose ... up -d --no-build` 复用镜像。
+推理程序源码已经以固定版本源码包放在 `vendor/sources/`，Docker 只复制、校验 SHA256 和解压，**不在构建时执行 GitHub 克隆或子模块下载**。pip 安装的是运行依赖，不是模型权重；已有构建好的镜像时可以通过 `docker compose ... up -d --no-build` 复用镜像。
 
-1. `deploy/tts.Dockerfile` 和 `deploy/lipsync.Dockerfile` 在构建时获取固定 Git 提交。CosyVoice 使用 Python 3.10 和 CUDA 12.1。MuseTalk 使用 Python 3.10 和 CUDA 11.8。镜像启动时只读取本地权重。
+1. `deploy/tts.Dockerfile` 和 `deploy/lipsync.Dockerfile` 从项目中的源码包安装固定提交；来源、校验值和裁剪说明见 `vendor/sources/README.md`。CosyVoice 使用 Python 3.10 和 CUDA 12.1。MuseTalk 使用 Python 3.10 和 CUDA 11.8。镜像启动时只读取本地权重。
 2. 从 [CosyVoice3 官方仓库](https://huggingface.co/FunAudioLLM/Fun-CosyVoice3-0.5B-2512) 获取完整快照。选定实际提交并记录，使用 `hf download FunAudioLLM/Fun-CosyVoice3-0.5B-2512 --revision "$COSYVOICE_REVISION" --local-dir ./models/cosyvoice`。MuseTalk 根据 [固定提交的资源清单](https://github.com/TMElyralab/MuseTalk/blob/0a89dec45a0192b824e3cf4daf96c239440c5ed8/download_weights.sh) 准备完整权重树，补齐 [模型服务文档](docs/model-services.md) 列出的检测器等文件。记录实际权重版本、SHA256 和许可。下载由操作者显式完成。
 3. 创建 `TTS_DATA_DIR` 和 `LIPSYNC_DATA_DIR`。在 TTS 数据目录中放入有权使用的参考音频及 `manifest.json`，填写对应音频逐字文本。MuseTalk 的数据目录需要可写，准备底片时会创建形象注册信息。权重目录和参考音频使用只读挂载。
 4. 启动后通过 Bearer 鉴权检查 TTS 与 MuseTalk 的 `GET /readyz`、TTS 的 `GET /voices` 和 Worker 的 `GET /healthz`。在后台创建数字人时填写已配置的 `voiceId`。首次开播会准备形象的默认 idle，可能需要几分钟。也可在开播前按模型服务文档调用 MuseTalk `/prepare`。

@@ -9,6 +9,9 @@
 !worker/**
 !deploy/
 !deploy/configure-apt.sh
+!vendor/
+!vendor/sources/
+!vendor/sources/**
 **/node_modules/
 **/dist/
 **/__pycache__/
