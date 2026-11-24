@@ -57,10 +57,17 @@ func (a *App) live(w http.ResponseWriter, r *http.Request, p []string) {
 		fail(w, 409, "Stale session")
 		return
 	}
+	if p[3] == "host-status" && r.Method == "GET" {
+		status := a.hostStatusLocked(s)
+		a.mu.Unlock()
+		write(w, 200, status)
+		return
+	}
 	if p[3] == "stop" && r.Method == "POST" {
 		if a.cancel != nil {
 			a.cancel()
 		}
+		a.invalidateHostLocked(p[2])
 		s["status"] = "stopping"
 		s["collectorHash"] = ""
 		if a.put("sessions", s) != nil {
@@ -124,6 +131,9 @@ func (a *App) live(w http.ResponseWriter, r *http.Request, p []string) {
 			a.mu.Unlock()
 			return
 		}
+		if s["hostEnabled"] != b.Enabled {
+			a.invalidateHostLocked(p[2])
+		}
 		s["hostEnabled"] = b.Enabled
 		if a.put("sessions", s) != nil {
 			a.mu.Unlock()
@@ -149,7 +159,8 @@ func (a *App) live(w http.ResponseWriter, r *http.Request, p []string) {
 			fail(w, 400, "Text required, maximum 10000 bytes")
 			return
 		}
-		e := a.task(s, id(), "manual", b.Text)
+		a.invalidateHostLocked(p[2])
+		e := a.registeredTask(s, id(), "manual", "manual", b.Text)
 		a.mu.Unlock()
 		if e != nil {
 			fail(w, 503, "Worker unavailable")
@@ -214,6 +225,7 @@ func (a *App) start(w http.ResponseWriter, r *http.Request) {
 		AvatarID string `json:"avatarId"`
 		LookID   string `json:"lookId"`
 		Platform string `json:"platform"`
+		HostMode string `json:"hostMode"`
 	}
 	if !decode(w, r, &b) {
 		return
@@ -231,6 +243,18 @@ func (a *App) start(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "Invalid avatar, look or platform")
 		return
 	}
+	mode := b.HostMode
+	if mode == "" {
+		mode = str(avatar, "hostMode")
+		if mode == "" {
+			mode = "fixed"
+		}
+	}
+	if !enum(mode, "fixed", "companion") {
+		a.mu.Unlock()
+		fail(w, 400, "主持模式无效")
+		return
+	}
 	defaultIdle := a.get("idles", str(look, "defaultIdleId"))
 	if defaultIdle == nil || defaultIdle["lookId"] != b.LookID {
 		a.mu.Unlock()
@@ -238,7 +262,7 @@ func (a *App) start(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	token := id() + id()
-	s := object{"id": id(), "avatarId": b.AvatarID, "lookId": b.LookID, "platform": b.Platform, "status": "starting", "hostEnabled": false, "previewUrl": "", "error": "", "createdAt": a.c.Clock().UTC().Format(time.RFC3339Nano), "collectorHash": hash(token)}
+	s := object{"id": id(), "avatarId": b.AvatarID, "lookId": b.LookID, "platform": b.Platform, "status": "starting", "hostMode": mode, "hostEnabled": false, "previewUrl": "", "error": "", "createdAt": a.c.Clock().UTC().Format(time.RFC3339Nano), "collectorHash": hash(token)}
 	tx, e := a.db.Begin()
 	if e == nil {
 		_, e = tx.Exec("INSERT INTO live_slot VALUES(1,?)", s["id"])
@@ -339,6 +363,20 @@ func (a *App) start(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	write(w, 201, object{"session": safeSession(s), "collectorToken": token})
+}
+func (a *App) registeredTask(s object, taskID, source, kind, text string) error {
+	sid := str(s, "id")
+	if err := a.RegisterPlayback(sid, taskID, source, "", ""); err != nil {
+		return err
+	}
+	if err := a.task(s, taskID, kind, text); err != nil {
+		_, markErr := a.db.Exec("UPDATE host_tasks SET state='unknown' WHERE session_id=? AND task_id=? AND state='pending'", sid, taskID)
+		if markErr != nil {
+			return markErr
+		}
+		return err
+	}
+	return nil
 }
 func (a *App) task(s object, i, k, text string) error {
 	now := a.c.Clock().UTC()

@@ -24,18 +24,21 @@ type Config struct {
 	DataDir, AdminToken, MediaToken, WorkerURL, WorkerToken, LLMURL, LLMToken, LLMModel, Timezone, PublicBaseURL, StaticDir string
 	HTTPClient                                                                                                              *http.Client
 	Clock                                                                                                                   func() time.Time
+	HostRandom                                                                                                              func(int) int
 }
 type App struct {
-	done         chan struct{}
-	closeOnce    sync.Once
-	c            Config
-	db           *sql.DB
-	mu           sync.Mutex
-	loc          *time.Location
-	cancel       context.CancelFunc
-	lastHost     time.Time
-	hostIndex    int
-	topicFlights map[string]*topicFlight
+	done           chan struct{}
+	closeOnce      sync.Once
+	c              Config
+	db             *sql.DB
+	mu             sync.Mutex
+	loc            *time.Location
+	cancel         context.CancelFunc
+	lastHost       time.Time
+	director       *hostDirector
+	hostTickActive bool
+	hostIndex      int
+	topicFlights   map[string]*topicFlight
 }
 type object map[string]any
 
@@ -120,6 +123,9 @@ func New(c Config) (http.Handler, error) {
 			s["error"] = ""
 			s["previewUrl"] = "/api/live/" + str(s, "id") + "/preview"
 			persistErr = a.put("sessions", s)
+			if persistErr == nil {
+				_, persistErr = a.db.Exec("UPDATE host_tasks SET state='unknown' WHERE session_id=? AND state='pending'", s["id"])
+			}
 		} else {
 			s["status"] = "error"
 			s["error"] = "Worker reconciliation required; stop this session before restart"
@@ -223,4 +229,14 @@ func str(o object, k string) string { s, _ := o[k].(string); return s }
 func hash(s string) string          { h := sha256.Sum256([]byte(s)); return hex.EncodeToString(h[:]) }
 
 // Close terminates background polling. Call after HTTP shutdown.
-func (a *App) Close() error { a.closeOnce.Do(func() { close(a.done) }); return nil }
+func (a *App) Close() error {
+	a.closeOnce.Do(func() {
+		close(a.done)
+		a.mu.Lock()
+		if a.director != nil {
+			a.invalidateHostLocked(a.director.sid)
+		}
+		a.mu.Unlock()
+	})
+	return nil
+}

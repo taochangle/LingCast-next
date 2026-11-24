@@ -182,6 +182,11 @@ func (a *App) hostTick() {
 		a.mu.Unlock()
 		return
 	}
+	if str(s, "hostMode") == "companion" {
+		a.mu.Unlock()
+		_ = a.CompanionTick(context.Background(), str(s, "id"))
+		return
+	}
 	var state struct {
 		SessionID           string  `json:"sessionId"`
 		Status              string  `json:"status"`
@@ -189,7 +194,16 @@ func (a *App) hostTick() {
 		QueueDepth          int     `json:"queueDepth"`
 		LastTaskCompletedAt float64 `json:"lastTaskCompletedAt"`
 	}
+	a.mu.Unlock()
+	_ = a.pollPlayed(context.Background(), str(s, "id"))
 	err := a.worker(context.Background(), "GET", "/status", nil, &state)
+	a.mu.Lock()
+	current := a.current()
+	if current == nil || current["id"] != s["id"] || current["status"] != "live" {
+		a.mu.Unlock()
+		return
+	}
+	s = current
 	if err != nil || state.SessionID != s["id"] || state.Status != "live" {
 		s["status"] = "error"
 		s["error"] = "Worker unavailable"
@@ -224,7 +238,7 @@ func (a *App) hostTick() {
 		}
 	}
 	if len(scripts) > 0 {
-		if a.task(s, id(), "host", scripts[a.hostIndex%len(scripts)]) == nil {
+		if a.registeredTask(s, id(), "fixed", "host", scripts[a.hostIndex%len(scripts)]) == nil {
 			a.hostIndex++
 			a.lastHost = a.c.Clock()
 		}
