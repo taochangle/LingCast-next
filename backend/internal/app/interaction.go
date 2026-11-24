@@ -9,6 +9,47 @@ import (
 	"time"
 )
 
+func migrateCollectorEvents(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	const schema = `CREATE TABLE IF NOT EXISTS events(session_id TEXT,id TEXT,state TEXT NOT NULL DEFAULT 'done' CHECK(state IN ('pending','retry','done')),first_arrival INTEGER,fixed_hash TEXT,PRIMARY KEY(session_id,id))`
+	if _, err = tx.Exec(schema); err != nil {
+		return err
+	}
+	var hasArrival, hasState bool
+	if err = tx.QueryRow("SELECT COUNT(*) FILTER (WHERE name='first_arrival'),COUNT(*) FILTER (WHERE name='state') FROM pragma_table_info('events')").Scan(&hasArrival, &hasState); err != nil {
+		return err
+	}
+	if !hasArrival {
+		// The old CHECK constraint admitted only pending/done. Preserve every ID,
+		// including databases predating the state column, in the new schema.
+		if _, err = tx.Exec("ALTER TABLE events RENAME TO collector_events_legacy"); err != nil {
+			return err
+		}
+		if _, err = tx.Exec(schema); err != nil {
+			return err
+		}
+		state := "'done'"
+		if hasState {
+			state = "state"
+		}
+		if _, err = tx.Exec("INSERT INTO events(session_id,id,state) SELECT session_id,id," + state + " FROM collector_events_legacy"); err != nil {
+			return err
+		}
+		if _, err = tx.Exec("DROP TABLE collector_events_legacy"); err != nil {
+			return err
+		}
+	}
+	// Reservations lost on restart become claimable; retain their original age.
+	if _, err = tx.Exec("UPDATE events SET state='retry' WHERE state='pending'"); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (a *App) collect(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
 		fail(w, 405, "Method not allowed")
@@ -82,27 +123,30 @@ func (a *App) collect(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		var state string
-		err := a.db.QueryRow("SELECT state FROM events WHERE session_id=? AND id=?", s["id"], e.ID).Scan(&state)
-		if err == nil {
-			if state == "done" {
-				outcomes[e.ID] = "processed"
-			}
-			continue
-		}
-		if err != sql.ErrNoRows {
+		var arrival sql.NullInt64
+		var fixedHash sql.NullString
+		err := a.db.QueryRow("SELECT state,first_arrival,fixed_hash FROM events WHERE session_id=? AND id=?", s["id"], e.ID).Scan(&state, &arrival, &fixedHash)
+		if err != nil && err != sql.ErrNoRows {
 			fail(w, 500, "Storage failure")
 			return
 		}
-		var count int
-		if a.db.QueryRow("SELECT COUNT(*) FROM events WHERE session_id=?", s["id"]).Scan(&count) != nil {
-			fail(w, 500, "Storage failure")
-			return
+		switch state {
+		case "done":
+			outcomes[e.ID] = "processed"
+			continue
+		case "pending":
+			continue
+		case "retry":
+			_, err = a.db.Exec("UPDATE events SET state='pending',first_arrival=COALESCE(first_arrival,?) WHERE session_id=? AND id=? AND state='retry'", arrivals.UnixNano(), s["id"], e.ID)
+		default:
+			_, err = a.db.Exec("INSERT INTO events(session_id,id,state,first_arrival) VALUES(?,?,'pending',?)", s["id"], e.ID, arrivals.UnixNano())
 		}
-		if count >= 10000 {
+		if err != nil {
 			continue
 		}
-		if _, err = a.db.Exec("INSERT INTO events(session_id,id,state) VALUES(?,?,'pending')", s["id"], e.ID); err != nil {
-			continue
+		arrived := arrivals
+		if arrival.Valid {
+			arrived = time.Unix(0, arrival.Int64)
 		}
 		kind := e.Kind
 		if kind == "enter" {
@@ -116,13 +160,36 @@ func (a *App) collect(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		event := ViewerTurn{Kind: kind, Nickname: e.Nickname, Text: e.Text}
-		a.viewerArrivedLocked(s)
+		// A Worker timeout may have delivered the old task. A changed source
+		// or edited fixed script must never enqueue replacement content under its ID.
+		if state == "retry" {
+			var source string
+			registeredErr := a.db.QueryRow("SELECT source FROM host_tasks WHERE session_id=? AND task_id=?", s["id"], e.ID).Scan(&source)
+			if registeredErr != nil && registeredErr != sql.ErrNoRows {
+				a.finishEventLocked(str(s, "id"), e.ID, registeredErr)
+				continue
+			}
+			obsolete := registeredErr == nil && ((source == "fixed" && (text == "" || !fixedHash.Valid || hash(text) != fixedHash.String)) || (source == "interaction" && text != ""))
+			if obsolete || kind == "comment" && a.c.Clock().Sub(arrived) > 30*time.Second {
+				if a.finishEventLocked(str(s, "id"), e.ID, nil) {
+					accepted++
+					outcomes[e.ID] = "processed"
+				}
+				continue
+			}
+		}
+		if state != "retry" {
+			a.viewerArrivedLocked(s)
+		}
 		if text == "" && kind == "comment" {
-			waiting[e.ID] = a.queueReplyLocked(s, e.ID, event, arrivals)
+			waiting[e.ID] = a.queueReplyLocked(s, e.ID, event, arrived)
 			continue
 		}
 		if text != "" {
-			err = a.submitEventLocked(s, e.ID, "fixed", kind, text)
+			_, err = a.db.Exec("UPDATE events SET fixed_hash=? WHERE session_id=? AND id=?", hash(text), s["id"], e.ID)
+			if err == nil {
+				err = a.submitEventLocked(s, e.ID, "fixed", kind, text)
+			}
 		}
 		if !a.finishEventLocked(str(s, "id"), e.ID, err) {
 			continue
@@ -191,7 +258,7 @@ func (a *App) finishEventLocked(sid, id string, err error) bool {
 			}
 		}
 	}
-	_, _ = a.db.Exec("DELETE FROM events WHERE session_id=? AND id=? AND state='pending'", sid, id)
+	_, _ = a.db.Exec("UPDATE events SET state='retry' WHERE session_id=? AND id=? AND state='pending'", sid, id)
 	return false
 }
 func (a *App) submitEventLocked(s object, id, source, kind, text string) error {

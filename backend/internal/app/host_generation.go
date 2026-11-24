@@ -238,7 +238,7 @@ func (a *App) generateReserve(ctx context.Context, in HostInput, manual bool) ([
 		return nil, errStale
 	}
 	in = fresh
-	rows, e := a.db.QueryContext(ctx, "SELECT topic_key FROM host_topics WHERE avatar_id=? AND state IN ('ready','active')", in.AvatarID)
+	rows, e := a.db.QueryContext(ctx, "SELECT topic_key FROM host_topics WHERE avatar_id=? AND (state IN ('ready','active') OR (state='disabled' AND created_at>=?))", in.AvatarID, in.ServerTime.Add(-7*24*time.Hour).Unix())
 	if e != nil {
 		return nil, e
 	}

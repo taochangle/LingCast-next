@@ -84,7 +84,7 @@ func New(c Config) (http.Handler, error) {
 		return nil, e
 	}
 	db.SetMaxOpenConns(1)
-	_, e = db.Exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS objects(id TEXT PRIMARY KEY, kind TEXT NOT NULL, body TEXT NOT NULL); CREATE TABLE IF NOT EXISTS live_slot(slot INTEGER PRIMARY KEY CHECK(slot=1),session_id TEXT NOT NULL); CREATE TABLE IF NOT EXISTS events(session_id TEXT,id TEXT,PRIMARY KEY(session_id,id));`)
+	_, e = db.Exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS objects(id TEXT PRIMARY KEY, kind TEXT NOT NULL, body TEXT NOT NULL); CREATE TABLE IF NOT EXISTS live_slot(slot INTEGER PRIMARY KEY CHECK(slot=1),session_id TEXT NOT NULL);`)
 	if e != nil {
 		return nil, e
 	}
@@ -92,21 +92,8 @@ func New(c Config) (http.Handler, error) {
 		db.Close()
 		return nil, e
 	}
-	var stateColumn int
-	if e = db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('events') WHERE name='state'").Scan(&stateColumn); e != nil {
-		_ = db.Close()
-		return nil, e
-	}
-	if stateColumn == 0 {
-		if _, e = db.Exec("ALTER TABLE events ADD COLUMN state TEXT NOT NULL DEFAULT 'done' CHECK(state IN ('pending','done'))"); e != nil {
-			_ = db.Close()
-			return nil, e
-		}
-	}
-	// Pending work belonged to a handler lost with the previous business process.
-	// Replaying its stable task ID is safe against the Worker's session deduplication.
-	if _, e = db.Exec("DELETE FROM events WHERE state='pending'"); e != nil {
-		_ = db.Close()
+	if e = migrateCollectorEvents(db); e != nil {
+		db.Close()
 		return nil, e
 	}
 	a := &App{c: c, db: db, loc: loc, done: make(chan struct{})} // A restart must never assume an old worker stopped.

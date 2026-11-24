@@ -101,7 +101,7 @@ func (a *App) LoadHostContext(avatarID, sessionID string) (HostInput, error) {
 		var t HostTopic
 		var angles string
 		var created int64
-		err = a.db.QueryRow(`SELECT t.id,t.title,t.angles,t.state,t.created_at,t.topic_key,r.angle_id FROM host_runs r JOIN host_topics t ON t.id=r.topic_id WHERE r.session_id=? AND r.avatar_id=? AND t.avatar_id=?`, sessionID, avatarID, avatarID).Scan(&t.ID, &t.Title, &angles, &t.State, &created, &t.Key, &in.CurrentAngleID)
+		err = a.db.QueryRow(`SELECT t.id,t.title,t.angles,t.state,t.created_at,t.topic_key,r.angle_id FROM host_runs r JOIN host_topics t ON t.id=r.topic_id WHERE r.session_id=? AND r.avatar_id=? AND t.avatar_id=? AND t.state!='disabled'`, sessionID, avatarID, avatarID).Scan(&t.ID, &t.Title, &angles, &t.State, &created, &t.Key, &in.CurrentAngleID)
 		if err == nil {
 			t.AvatarID = avatarID
 			t.CreatedAt = time.Unix(created, 0)
@@ -130,7 +130,7 @@ func (a *App) LoadHostContext(avatarID, sessionID string) (HostInput, error) {
 			return in, err
 		}
 	}
-	rows, err := a.db.Query(`SELECT key FROM (SELECT topic_key AS key,created_at AS ts FROM host_topics WHERE avatar_id=? UNION ALL SELECT key,seen_at FROM host_recent_keys WHERE avatar_id=?) WHERE ts>=? GROUP BY key ORDER BY MAX(ts) DESC,key LIMIT 200`, avatarID, avatarID, in.ServerTime.Add(-7*24*time.Hour).Unix())
+	rows, err := a.db.Query(`SELECT key FROM (SELECT topic_key AS key,created_at AS ts FROM host_topics WHERE avatar_id=? AND state!='disabled' UNION ALL SELECT key,seen_at FROM host_recent_keys WHERE avatar_id=?) WHERE ts>=? GROUP BY key ORDER BY MAX(ts) DESC,key LIMIT 200`, avatarID, avatarID, in.ServerTime.Add(-7*24*time.Hour).Unix())
 	if err != nil {
 		return in, err
 	}
@@ -143,6 +143,38 @@ func (a *App) LoadHostContext(avatarID, sessionID string) (HostInput, error) {
 		in.RecentTopicKeys = append(in.RecentTopicKeys, key)
 	}
 	return in, rows.Err()
+}
+
+// Retire only the unchanged application-owned material that was audited.
+func (a *App) quarantineMaterial(in HostInput) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if !a.validHostInput(in) {
+		return nil
+	}
+	tx, err := a.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	t := in.CurrentTopic
+	res, err := tx.Exec("UPDATE host_topics SET state='disabled' WHERE avatar_id=? AND id=? AND title=? AND topic_key=? AND state IN ('ready','active','done')", in.AvatarID, t.ID, t.Title, t.Key)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil || n == 0 {
+		return err
+	}
+	// Keys derived from rejected titles or angles must also leave model-facing memory.
+	if _, err = tx.Exec("DELETE FROM host_recent_keys WHERE avatar_id=? AND (key=? OR substr(key,1,length(?)+1)=?||'/')", in.AvatarID, t.Key, t.Key, t.Key); err != nil {
+		return err
+	}
+	if err = tx.Commit(); err != nil {
+		return err
+	}
+	a.invalidateHostLocked(in.SessionID)
+	return nil
 }
 
 type TaskResultsPage struct {

@@ -144,6 +144,24 @@ func parseSpeech(raw string) (string, error) {
 	return "", errors.New("Invalid speech decision")
 }
 func (a *App) CheckGeneratedSpeech(ctx context.Context, c SpeechCandidate) (SafetyDecision, error) {
+	decision, err := a.checkCandidate(ctx, c)
+	topic := c.Context.CurrentTopic
+	if err != nil || topic == nil || topic.ID == "" || decision.Allow || !enum(decision.Category, "injection", "secret-exfiltration") {
+		return decision, err
+	}
+	// Isolate the topic before retiring it. A viewer or a rejected output
+	// alone must never cause an otherwise safe topic to disappear.
+	material, err := a.auditMaterial(ctx, object{"topic": topic})
+	if err != nil {
+		return decision, err
+	}
+	if !material.Allow && enum(material.Category, "injection", "secret-exfiltration") {
+		err = a.quarantineMaterial(c.Context)
+	}
+	return decision, err
+}
+
+func (a *App) checkCandidate(ctx context.Context, c SpeechCandidate) (SafetyDecision, error) {
 	deny := SafetyDecision{Category: "unsafe-content"}
 	size := utf8.RuneCountInString(c.Text)
 	if !enum(c.Source, "interaction", "host") || strings.TrimSpace(c.Text) == "" || size > 120 || c.Source == "host" && size < 40 {

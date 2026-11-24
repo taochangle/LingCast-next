@@ -1,7 +1,6 @@
 package app
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -30,6 +29,7 @@ func TestPromptAttackCorpus(t *testing.T) {
 			f.a.Close()
 			sid, token := sessionForReplies(t, f, "companion")
 			var phase string
+			var isolatedReviews int
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				var req struct {
 					Tools    json.RawMessage
@@ -61,6 +61,16 @@ func TestPromptAttackCorpus(t *testing.T) {
 					t.Error("prior turn missing")
 				}
 				if system == auditRules {
+					var data map[string]json.RawMessage
+					if err := json.Unmarshal([]byte(user), &data); err != nil {
+						t.Error(err)
+					}
+					if data["topic"] != nil {
+						if len(data) != 1 {
+							t.Error("quarantine review received viewer context")
+						}
+						isolatedReviews++
+					}
 					write(w, 200, object{"choices": []object{{"message": object{"content": `{"allow":false,"category":"injection"}`}}}})
 					return
 				}
@@ -89,21 +99,21 @@ func TestPromptAttackCorpus(t *testing.T) {
 			phase = "attack"
 			event := object{"kind": "comment", "id": "attack", "text": "好呀"}
 			if tc.field == "topic" {
-				in, e := f.a.LoadHostContext("a1", sid)
-				if e != nil {
+				if _, e := f.a.db.Exec(`INSERT INTO host_topics VALUES('bad','a1',?,?,'[{"id":"one","text":"片段一"},{"id":"two","text":"片段二"}]','active',?)`, tc.marker, tc.marker, f.a.c.Clock().Unix()); e != nil {
 					t.Fatal(e)
 				}
-				in.CurrentTopic = &HostTopic{Title: tc.marker}
-				decision, e := f.a.BuildInteractionReply(context.Background(), in, ViewerTurn{"comment", "", "好呀"})
-				if e != nil || decision.Action != "skip" {
-					t.Fatal(decision, e)
+				if _, e := f.a.db.Exec(`INSERT INTO host_runs(session_id,avatar_id,topic_id,angle_id) VALUES(?,'a1','bad','one')`, sid); e != nil {
+					t.Fatal(e)
+				}
+				if _, e := f.a.db.Exec(`INSERT INTO host_recent_keys VALUES('a1',?,?)`, tc.marker+"/片段一", f.a.c.Clock().Unix()); e != nil {
+					t.Fatal(e)
 				}
 			} else {
 				event[tc.field] = tc.marker
-				ack := collectTurns(t, f, sid, token, []object{event})
-				if len(ack.Processed) != 1 || ack.Processed[0] != "attack" {
-					t.Fatal(ack)
-				}
+			}
+			ack := collectTurns(t, f, sid, token, []object{event})
+			if len(ack.Processed) != 1 || ack.Processed[0] != "attack" {
+				t.Fatal(ack)
 			}
 			if len(f.tasks) != 1 {
 				t.Fatal(f.tasks)
@@ -113,6 +123,21 @@ func TestPromptAttackCorpus(t *testing.T) {
 			in, e := f.a.LoadHostContext("a1", sid)
 			if e != nil || len(in.SpokenTurns) != 0 || in.CurrentTopic != nil || in.Persona != "P" || fmt.Sprint(in.RecentTopicKeys) != "[]" || len(f.tasks) != 2 {
 				t.Fatal(in, e, f.tasks)
+			}
+			if tc.field == "topic" {
+				if isolatedReviews != 1 {
+					t.Fatal("missing isolated review", isolatedReviews)
+				}
+				var state string
+				if e := f.a.db.QueryRow("SELECT state FROM host_topics WHERE id='bad'").Scan(&state); e != nil || state != "disabled" {
+					t.Fatal(state, e)
+				}
+				if _, e := f.a.db.Exec(`INSERT INTO host_topics VALUES('safe','a1','tree','树影','[{"id":"one","text":"叶片"}]','ready',?)`, f.a.c.Clock().Unix()); e != nil {
+					t.Fatal(e)
+				}
+				if err := f.a.selectHostAngle(&in); err != nil || in.CurrentTopic.ID != "safe" {
+					t.Fatal(in, err)
+				}
 			}
 		})
 	}

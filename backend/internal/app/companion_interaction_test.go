@@ -242,3 +242,120 @@ func TestStaleInteractionNeverSubmits(t *testing.T) {
 		})
 	}
 }
+
+func TestExpiredRedeliveryKeepsFirstArrival(t *testing.T) {
+	f := newFixture(t)
+	f.a.Close()
+	now := f.a.c.Clock()
+	var offset atomic.Int64
+	f.a.c.Clock = func() time.Time { return now.Add(time.Duration(offset.Load()) * time.Second) }
+	sid, token := sessionForReplies(t, f, "fixed")
+	var hits atomic.Int64
+	model := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hits.Add(1); offset.Store(19); failHTTP(w) }))
+	defer model.Close()
+	f.a.c.LLMURL = model.URL
+	events := []object{{"id": "stable", "kind": "comment", "text": "窗边的叶子"}}
+	ack := collectTurns(t, f, sid, token, events)
+	if len(ack.Retry) != 1 {
+		t.Fatal(ack)
+	}
+	offset.Store(35)
+	ack = collectTurns(t, f, sid, token, events)
+	if len(ack.Processed) != 1 || hits.Load() != 1 || len(f.tasks) != 0 {
+		t.Fatal(ack, hits.Load(), f.tasks)
+	}
+}
+
+func TestScriptChangeAcrossFailedSubmission(t *testing.T) {
+	for _, initialFixed := range []bool{false, true} {
+		t.Run(fmt.Sprint(initialFixed), func(t *testing.T) {
+			f := newFixture(t)
+			f.a.Close()
+			sid, token := sessionForReplies(t, f, "fixed")
+			setFixed := func() {
+				if e := f.a.put("scripts", object{"id": "fixed", "avatarId": "a1", "kind": "comment", "text": "固定原文"}); e != nil {
+					t.Fatal(e)
+				}
+			}
+			if initialFixed {
+				setFixed()
+			}
+			var posts, models atomic.Int64
+			modelFixture(t, f.a, func(sys string) string {
+				models.Add(1)
+				if sys == auditRules {
+					return `{"allow":true,"category":"safe"}`
+				}
+				return `{"action":"speak","text":"窗边的树影。"}`
+			})
+			worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { posts.Add(1); failHTTP(w) }))
+			defer worker.Close()
+			f.a.c.WorkerURL = worker.URL
+			events := []object{{"id": "stable", "kind": "comment", "text": "窗边的树影"}}
+			ack := collectTurns(t, f, sid, token, events)
+			if len(ack.Retry) != 1 || posts.Load() != 1 {
+				t.Fatal(ack, posts.Load())
+			}
+			if initialFixed {
+				_, e := f.a.db.Exec("DELETE FROM objects WHERE kind='scripts' AND id='fixed'")
+				if e != nil {
+					t.Fatal(e)
+				}
+			} else {
+				setFixed()
+			}
+			before := models.Load()
+			ack = collectTurns(t, f, sid, token, events)
+			if len(ack.Processed) != 1 || posts.Load() != 1 || models.Load() != before {
+				t.Fatal(ack, posts.Load(), models.Load())
+			}
+			ack = collectTurns(t, f, sid, token, events)
+			if ack.Accepted != 0 || len(ack.Processed) != 1 {
+				t.Fatal(ack)
+			}
+		})
+	}
+}
+
+func TestCollectorEventAgeMigration(t *testing.T) {
+	for _, legacyState := range []bool{false, true} {
+		t.Run(fmt.Sprint(legacyState), func(t *testing.T) {
+			f := newFixture(t)
+			f.a.Close()
+			schema := "session_id TEXT,id TEXT,PRIMARY KEY(session_id,id)"
+			if legacyState {
+				schema = "session_id TEXT,id TEXT,state TEXT NOT NULL DEFAULT 'done' CHECK(state IN ('pending','done')),PRIMARY KEY(session_id,id)"
+			}
+			if _, err := f.a.db.Exec("DROP TABLE events; CREATE TABLE events(" + schema + "); INSERT INTO events(session_id,id) VALUES('sid','done')"); err != nil {
+				t.Fatal(err)
+			}
+			if legacyState {
+				if _, err := f.a.db.Exec("INSERT INTO events VALUES('sid','working','pending')"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := migrateCollectorEvents(f.a.db); err != nil {
+				t.Fatal(err)
+			}
+			var state string
+			if err := f.a.db.QueryRow("SELECT state FROM events WHERE id='done'").Scan(&state); err != nil || state != "done" {
+				t.Fatal(state, err)
+			}
+			if legacyState {
+				if err := f.a.db.QueryRow("SELECT state FROM events WHERE id='working'").Scan(&state); err != nil || state != "retry" {
+					t.Fatal(state, err)
+				}
+			}
+			if _, err := f.a.db.Exec("INSERT INTO events(session_id,id,state,first_arrival) VALUES('sid','lost','pending',123)"); err != nil {
+				t.Fatal(err)
+			}
+			if err := migrateCollectorEvents(f.a.db); err != nil {
+				t.Fatal(err)
+			}
+			var arrival int64
+			if err := f.a.db.QueryRow("SELECT state,first_arrival FROM events WHERE id='lost'").Scan(&state, &arrival); err != nil || state != "retry" || arrival != 123 {
+				t.Fatal(state, arrival, err)
+			}
+		})
+	}
+}
