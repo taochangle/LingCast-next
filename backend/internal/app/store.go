@@ -197,7 +197,7 @@ func (a *App) crud(w http.ResponseWriter, r *http.Request, p []string) {
 			return
 		}
 	}
-	if k == "scripts" && !strings.Contains("|host|welcome|gift|like|comment|", "|"+str(o, "kind")+"|") {
+	if k == "scripts" && !enum(str(o, "kind"), "host", "welcome", "gift", "like", "comment") {
 		fail(w, 400, "Invalid script kind")
 		return
 	}
@@ -210,4 +210,45 @@ func (a *App) crud(w http.ResponseWriter, r *http.Request, p []string) {
 		code = 201
 	}
 	write(w, code, o)
+}
+
+// terminal persists the terminal record and releases only this session's slot atomically.
+func (a *App) terminal(s object) error {
+	tx, e := a.db.Begin()
+	if e != nil {
+		return e
+	}
+	defer tx.Rollback()
+	raw, e := json.Marshal(s)
+	if e != nil {
+		return e
+	}
+	if _, e = tx.Exec("UPDATE objects SET body=? WHERE id=? AND kind='sessions'", string(raw), s["id"]); e != nil {
+		return e
+	}
+	if _, e = tx.Exec("DELETE FROM live_slot WHERE session_id=?", s["id"]); e != nil {
+		return e
+	}
+	if _, e = tx.Exec("DELETE FROM events WHERE session_id=?", s["id"]); e != nil {
+		return e
+	}
+	return tx.Commit()
+}
+func (a *App) lastSession() object {
+	var raw string
+	e := a.db.QueryRow(`SELECT body FROM objects WHERE kind='sessions' AND json_extract(body,'$.status') IN ('stopped','error') AND NOT EXISTS(SELECT 1 FROM live_slot WHERE session_id=objects.id) ORDER BY rowid DESC LIMIT 1`).Scan(&raw)
+	if e != nil {
+		return nil
+	}
+	var s object
+	_ = json.Unmarshal([]byte(raw), &s)
+	return s
+}
+func enum(value string, allowed ...string) bool {
+	for _, v := range allowed {
+		if value == v {
+			return true
+		}
+	}
+	return false
 }

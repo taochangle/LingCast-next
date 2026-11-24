@@ -86,20 +86,30 @@ func New(c Config) (http.Handler, error) {
 	a := &App{c: c, db: db, loc: loc, done: make(chan struct{})} // A restart must never assume an old worker stopped.
 	if s := a.current(); s != nil {
 		var status object
-		if a.worker(context.Background(), "GET", "/status", nil, &status) != nil || status["sessionId"] != s["id"] {
+		statusErr := a.worker(context.Background(), "GET", "/status", nil, &status)
+		var persistErr error
+		if statusErr == nil && status["status"] == "stopped" && status["preparing"] == false {
 			s["status"] = "error"
-			s["error"] = "Worker reconciliation required; stop this session before restart"
-			_ = a.put("sessions", s)
-		} else if status["status"] == "live" {
+			s["error"] = "Worker restarted or no longer owns this session"
+			s["collectorHash"] = ""
+			persistErr = a.terminal(s)
+		} else if statusErr == nil && status["sessionId"] == s["id"] && status["status"] == "live" {
 			s["status"] = "live"
-			_ = a.put("sessions", s)
+			s["error"] = ""
+			s["previewUrl"] = "/api/live/" + str(s, "id") + "/preview"
+			persistErr = a.put("sessions", s)
 		} else {
 			s["status"] = "error"
-			s["error"] = "Worker is not live; stop to reconcile"
+			s["error"] = "Worker reconciliation required; stop this session before restart"
 			s["collectorHash"] = ""
-			_ = a.put("sessions", s)
+			persistErr = a.put("sessions", s)
+		}
+		if persistErr != nil {
+			_ = db.Close()
+			return nil, persistErr
 		}
 	}
+
 	go a.hostLoop()
 	return a, nil
 }

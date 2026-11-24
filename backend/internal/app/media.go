@@ -1,10 +1,12 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	_ "image/gif"
@@ -89,7 +91,18 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request) {
 	} else {
 		ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 		defer cancel()
-		raw, e := exec.CommandContext(ctx, "ffprobe", "-v", "error", "-show_streams", "-show_format", "-of", "json", path).Output()
+		format, detectErr := videoFormat(path)
+		if detectErr != nil {
+			fail(w, 400, "Supported self-contained video required (MP4/MOV, WebM/MKV, AVI)")
+			return
+		}
+		inputArgs := []string{"-protocol_whitelist", "file", "-format_whitelist", format, "-f", format}
+		if format == "mov" {
+			inputArgs = append(inputArgs, "-enable_drefs", "0", "-use_absolute_path", "0")
+		}
+		probeArgs := append([]string{"-v", "error", "-max_alloc", "134217728"}, inputArgs...)
+		probeArgs = append(probeArgs, "-show_streams", "-show_format", "-of", "json", path)
+		raw, e := boundedOutput(exec.CommandContext(ctx, "ffprobe", probeArgs...))
 		var probe struct {
 			Format struct {
 				Duration string `json:"duration"`
@@ -132,7 +145,9 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request) {
 			fail(w, 400, "Video required")
 			return
 		}
-		if e = exec.CommandContext(ctx, "ffmpeg", "-v", "error", "-xerror", "-i", path, "-f", "null", "-").Run(); e != nil {
+		decodeArgs := append([]string{"-v", "error", "-xerror", "-max_alloc", "134217728", "-threads", "2"}, inputArgs...)
+		decodeArgs = append(decodeArgs, "-i", path, "-f", "null", "-")
+		if e = exec.CommandContext(ctx, "ffmpeg", decodeArgs...).Run(); e != nil {
 			fail(w, 400, "Video decode failed")
 			return
 		}
@@ -149,4 +164,44 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	write(w, 201, a.publicMedia(o))
+}
+
+// Force a self-contained demuxer from the file signature before FFmpeg sees input.
+// Network protocols and playlists are never enabled; MOV external data refs are disabled.
+func videoFormat(path string) (string, error) {
+	f, e := os.Open(path)
+	if e != nil {
+		return "", e
+	}
+	defer f.Close()
+	b := make([]byte, 12)
+	if _, e = io.ReadFull(f, b); e != nil {
+		return "", e
+	}
+	switch {
+	case string(b[4:8]) == "ftyp":
+		return "mov", nil
+	case bytes.Equal(b[:4], []byte{0x1a, 0x45, 0xdf, 0xa3}):
+		return "matroska", nil
+	case string(b[:4]) == "RIFF" && string(b[8:12]) == "AVI ":
+		return "avi", nil
+	}
+	return "", errors.New("Unsupported container")
+}
+
+type cappedOutput struct{ bytes.Buffer }
+
+func (b *cappedOutput) Write(p []byte) (int, error) {
+	if b.Len()+len(p) > 2<<20 {
+		return 0, errors.New("Probe metadata exceeds limit")
+	}
+	return b.Buffer.Write(p)
+}
+func boundedOutput(cmd *exec.Cmd) ([]byte, error) {
+	var out cappedOutput
+	cmd.Stdout = &out
+	if e := cmd.Run(); e != nil {
+		return nil, e
+	}
+	return out.Bytes(), nil
 }

@@ -23,7 +23,7 @@ func safeSession(s object) object {
 }
 func (a *App) live(w http.ResponseWriter, r *http.Request, p []string) {
 	if len(p) == 2 && r.Method == "GET" {
-		write(w, 200, object{"session": safeSession(a.current())})
+		write(w, 200, object{"session": safeSession(a.current()), "lastSession": safeSession(a.lastSession())})
 		return
 	}
 	if len(p) == 2 && r.Method == "POST" {
@@ -47,21 +47,33 @@ func (a *App) live(w http.ResponseWriter, r *http.Request, p []string) {
 		}
 		s["status"] = "stopping"
 		s["collectorHash"] = ""
-		_ = a.put("sessions", s)
+		if a.put("sessions", s) != nil {
+			a.mu.Unlock()
+			fail(w, 500, "Storage failure")
+			return
+		}
 		a.mu.Unlock()
 		e := a.worker(context.Background(), "POST", "/sessions/"+p[2]+"/stop", nil, nil)
+		if e != nil && a.workerIdle(context.Background()) {
+			e = nil
+		}
 		a.mu.Lock()
 		defer a.mu.Unlock()
 		if e != nil {
 			s["status"] = "error"
 			s["error"] = "Worker stop unconfirmed; retry stop"
-			_ = a.put("sessions", s)
+			if a.put("sessions", s) != nil {
+				fail(w, 500, "Storage failure")
+				return
+			}
 			fail(w, 503, str(s, "error"))
 			return
 		}
 		s["status"] = "stopped"
-		_ = a.put("sessions", s)
-		_, _ = a.db.Exec("DELETE FROM live_slot WHERE session_id=?", p[2])
+		if a.terminal(s) != nil {
+			fail(w, 500, "Storage failure")
+			return
+		}
 		write(w, 200, safeSession(s))
 		return
 	}
@@ -77,7 +89,11 @@ func (a *App) live(w http.ResponseWriter, r *http.Request, p []string) {
 		}
 		token := id() + id()
 		s["collectorHash"] = hash(token)
-		_ = a.put("sessions", s)
+		if a.put("sessions", s) != nil {
+			a.mu.Unlock()
+			fail(w, 500, "Storage failure")
+			return
+		}
 		a.mu.Unlock()
 		write(w, 200, object{"collectorToken": token})
 		return
@@ -93,7 +109,11 @@ func (a *App) live(w http.ResponseWriter, r *http.Request, p []string) {
 			return
 		}
 		s["hostEnabled"] = b.Enabled
-		_ = a.put("sessions", s)
+		if a.put("sessions", s) != nil {
+			a.mu.Unlock()
+			fail(w, 500, "Storage failure")
+			return
+		}
 		a.mu.Unlock()
 		write(w, 200, safeSession(s))
 		return
@@ -253,15 +273,25 @@ func (a *App) start(w http.ResponseWriter, r *http.Request) {
 		var cleanup error
 		if startAttempted {
 			cleanup = a.worker(context.Background(), "POST", "/sessions/"+str(s, "id")+"/stop", nil, nil)
+			if cleanup != nil && a.workerIdle(context.Background()) {
+				cleanup = nil
+			}
 		}
 		a.mu.Lock()
 		if cur := a.current(); cur != nil && cur["id"] == s["id"] && cur["status"] == "starting" {
 			s["status"] = "error"
 			s["error"] = "Worker start failed"
 			s["collectorHash"] = ""
-			_ = a.put("sessions", s)
+			var persistErr error
 			if cleanup == nil {
-				_, _ = a.db.Exec("DELETE FROM live_slot WHERE session_id=?", s["id"])
+				persistErr = a.terminal(s)
+			} else {
+				persistErr = a.put("sessions", s)
+			}
+			if persistErr != nil {
+				a.mu.Unlock()
+				fail(w, 500, "Storage failure")
+				return
 			}
 		}
 		a.mu.Unlock()
@@ -276,8 +306,20 @@ func (a *App) start(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s["status"] = "live"
-	s["previewUrl"] = strings.TrimRight(a.c.PublicBaseURL, "/") + "/api/live/" + str(s, "id") + "/preview"
-	_ = a.put("sessions", s)
+	s["previewUrl"] = "/api/live/" + str(s, "id") + "/preview"
+	if a.put("sessions", s) != nil {
+		a.mu.Unlock()
+		stopErr := a.worker(context.Background(), "POST", "/sessions/"+str(s, "id")+"/stop", nil, nil)
+		a.mu.Lock()
+		if stopErr == nil {
+			s["status"] = "error"
+			s["error"] = "Start persistence failed"
+			s["collectorHash"] = ""
+			_ = a.terminal(s)
+		}
+		fail(w, 500, "Storage failure after Worker startup")
+		return
+	}
 	write(w, 201, object{"session": safeSession(s), "collectorToken": token})
 }
 func (a *App) task(s object, i, k, text string) error {

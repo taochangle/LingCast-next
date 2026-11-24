@@ -55,3 +55,9 @@ func (a *App) remote(ctx context.Context, base, token, m, p string, in, out any)
 	}
 	return nil
 }
+
+// workerIdle requires an explicit preparation flag, not absence of an active ID alone.
+func (a *App) workerIdle(ctx context.Context) bool {
+	var status object
+	return a.worker(ctx, "GET", "/status", nil, &status) == nil && status["status"] == "stopped" && status["preparing"] == false
+}

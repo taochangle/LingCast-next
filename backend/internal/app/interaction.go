@@ -42,10 +42,30 @@ func (a *App) collect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, e := range b.Events {
-		if e.ID == "" || len(e.ID) > 200 || len(e.Text) > 10000 || len(e.Nickname) > 500 || !strings.Contains("|comment|enter|gift|like|", "|"+e.Kind+"|") {
+		if e.ID == "" || len(e.ID) > 200 || len(e.Text) > 10000 || len(e.Nickname) > 500 || !enum(e.Kind, "comment", "enter", "gift", "like") {
 			fail(w, 400, "Invalid event")
 			return
 		}
+	}
+	var count int
+	if a.db.QueryRow("SELECT COUNT(*) FROM events WHERE session_id=?", s["id"]).Scan(&count) != nil {
+		fail(w, 500, "Storage failure")
+		return
+	}
+	newIDs := map[string]bool{}
+	for _, e := range b.Events {
+		var existing int
+		if err := a.db.QueryRow("SELECT COUNT(*) FROM events WHERE session_id=? AND id=?", s["id"], e.ID).Scan(&existing); err != nil {
+			fail(w, 500, "Storage failure")
+			return
+		}
+		if existing == 0 {
+			newIDs[e.ID] = true
+		}
+	}
+	if count+len(newIDs) > 10000 {
+		fail(w, 409, "Session event capacity reached; stop and restart session")
+		return
 	}
 	accepted := 0
 	for _, e := range b.Events {
@@ -54,6 +74,15 @@ func (a *App) collect(w http.ResponseWriter, r *http.Request) {
 		current := a.current()
 		if current == nil || current["id"] != s["id"] || current["status"] != "live" {
 			break
+		}
+		var count, exists int
+		if a.db.QueryRow("SELECT COUNT(*) FROM events WHERE session_id=?", s["id"]).Scan(&count) != nil || a.db.QueryRow("SELECT COUNT(*) FROM events WHERE session_id=? AND id=?", s["id"], e.ID).Scan(&exists) != nil {
+			fail(w, 500, "Storage failure")
+			return
+		}
+		if exists == 0 && count >= 10000 {
+			fail(w, 409, "Session event capacity reached; stop and restart session")
+			return
 		}
 		res, err := a.db.Exec("INSERT OR IGNORE INTO events VALUES(?,?)", s["id"], e.ID)
 		if err != nil {
@@ -92,8 +121,7 @@ func (a *App) collect(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		accepted++
-	} // bounded dedup history; worker separately deduplicates task IDs.
-	_, _ = a.db.Exec("DELETE FROM events WHERE session_id=? AND rowid NOT IN (SELECT rowid FROM events WHERE session_id=? ORDER BY rowid DESC LIMIT 10000)", s["id"], s["id"])
+	} // Retain every accepted identity until stop; reject new IDs at the session cap.
 	write(w, 200, object{"accepted": accepted, "serverTime": a.c.Clock().UTC().Format(time.RFC3339Nano)})
 }
 func (a *App) hostLoop() {
@@ -123,7 +151,7 @@ func (a *App) hostTick() {
 		LastTaskCompletedAt float64 `json:"lastTaskCompletedAt"`
 	}
 	err := a.worker(context.Background(), "GET", "/status", nil, &state)
-	if err != nil || state.SessionID != s["id"] || state.Status == "error" {
+	if err != nil || state.SessionID != s["id"] || state.Status != "live" {
 		s["status"] = "error"
 		s["error"] = "Worker unavailable"
 		s["collectorHash"] = ""
