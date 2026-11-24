@@ -185,7 +185,9 @@ func (a *App) live(w http.ResponseWriter, r *http.Request, p []string) {
 		defer resp.Body.Close()
 		w.Header().Set("Content-Type", "video/x-flv")
 		w.WriteHeader(resp.StatusCode)
-		_, _ = io.Copy(w, resp.Body)
+		controller := http.NewResponseController(w)
+		_ = controller.Flush()
+		_, _ = io.Copy(flushingWriter{w: w, controller: controller}, resp.Body)
 		return
 	}
 	a.mu.Unlock()
@@ -325,4 +327,21 @@ func (a *App) start(w http.ResponseWriter, r *http.Request) {
 func (a *App) task(s object, i, k, text string) error {
 	now := a.c.Clock().UTC()
 	return a.worker(context.Background(), "POST", "/sessions/"+str(s, "id")+"/tasks", object{"id": i, "kind": k, "text": text, "createdAt": now.Format(time.RFC3339Nano), "expiresAt": now.Add(120 * time.Second).Format(time.RFC3339Nano)}, nil)
+}
+
+// A streaming preview must expose each upstream chunk before the stream ends.
+type flushingWriter struct {
+	w          http.ResponseWriter
+	controller *http.ResponseController
+}
+
+func (f flushingWriter) Write(p []byte) (int, error) {
+	n, e := f.w.Write(p)
+	if e != nil {
+		return n, e
+	}
+	if e = f.controller.Flush(); e != nil {
+		return n, e
+	}
+	return n, nil
 }

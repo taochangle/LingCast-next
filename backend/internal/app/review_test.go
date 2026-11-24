@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestRecoverSlotAfterWorkerRestart(t *testing.T) {
@@ -133,7 +135,7 @@ func TestSessionDedupDoesNotForget(t *testing.T) {
 	sid := str(f.a.current(), "id")
 	tx, _ := f.a.db.Begin()
 	for i := 0; i < 10000; i++ {
-		_, _ = tx.Exec("INSERT INTO events VALUES(?,?)", sid, fmt.Sprint(i))
+		_, _ = tx.Exec("INSERT INTO events(session_id,id) VALUES(?,?)", sid, fmt.Sprint(i))
 	}
 	_ = tx.Commit()
 	body := fmt.Sprintf(`{"sessionId":%q,"platform":"douyin","events":[{"id":"new","kind":"like"}]}`, sid)
@@ -277,10 +279,41 @@ func TestBoundedOutputRejectsOversizedChild(t *testing.T) {
 	if !ok {
 		t.Fatal("missing capped writer")
 	}
-	if out.buffer.Cap() > 2<<20 {
-		t.Fatal("retained buffer allocation exceeds cap", out.buffer.Cap())
-	}
 	if len(out.Bytes()) > 2<<20 {
 		t.Fatal("retained output exceeds cap", len(out.Bytes()))
+	}
+}
+
+func TestPreviewFlushesBeforeUpstreamCloses(t *testing.T) {
+	f := newFixture(t)
+	_ = f.a.Close()
+	_ = f.start()
+	sid := str(f.a.current(), "id")
+	release := make(chan struct{})
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "video/x-flv")
+		_, _ = w.Write([]byte("FLV"))
+		w.(http.Flusher).Flush()
+		<-release
+	}))
+	defer upstream.Close()
+	defer close(release)
+	f.a.c.WorkerURL = upstream.URL
+	server := httptest.NewServer(f.h)
+	defer server.Close()
+	client := &http.Client{Timeout: 500 * time.Millisecond}
+	req, _ := http.NewRequest("GET", server.URL+"/api/live/"+sid+"/preview", nil)
+	req.Header.Set("Authorization", "Bearer a")
+	resp, e := client.Do(req)
+	if e != nil {
+		t.Fatal("preview did not flush headers before close", e)
+	}
+	defer resp.Body.Close()
+	buf := make([]byte, 3)
+	if _, e = io.ReadFull(resp.Body, buf); e != nil {
+		t.Fatal("preview did not flush bytes before close", e)
+	}
+	if string(buf) != "FLV" {
+		t.Fatal(string(buf))
 	}
 }

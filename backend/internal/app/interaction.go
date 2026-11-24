@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"database/sql"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -68,6 +70,10 @@ func (a *App) collect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	accepted := 0
+	outcomes := map[string]string{}
+	for _, e := range b.Events {
+		outcomes[e.ID] = "retry"
+	}
 	for _, e := range b.Events {
 		a.mu.Unlock()
 		a.mu.Lock()
@@ -75,21 +81,27 @@ func (a *App) collect(w http.ResponseWriter, r *http.Request) {
 		if current == nil || current["id"] != s["id"] || current["status"] != "live" {
 			break
 		}
-		var count, exists int
-		if a.db.QueryRow("SELECT COUNT(*) FROM events WHERE session_id=?", s["id"]).Scan(&count) != nil || a.db.QueryRow("SELECT COUNT(*) FROM events WHERE session_id=? AND id=?", s["id"], e.ID).Scan(&exists) != nil {
+		var state string
+		err := a.db.QueryRow("SELECT state FROM events WHERE session_id=? AND id=?", s["id"], e.ID).Scan(&state)
+		if err == nil {
+			if state == "done" {
+				outcomes[e.ID] = "processed"
+			}
+			continue
+		}
+		if err != sql.ErrNoRows {
 			fail(w, 500, "Storage failure")
 			return
 		}
-		if exists == 0 && count >= 10000 {
-			fail(w, 409, "Session event capacity reached; stop and restart session")
+		var count int
+		if a.db.QueryRow("SELECT COUNT(*) FROM events WHERE session_id=?", s["id"]).Scan(&count) != nil {
+			fail(w, 500, "Storage failure")
 			return
 		}
-		res, err := a.db.Exec("INSERT OR IGNORE INTO events VALUES(?,?)", s["id"], e.ID)
-		if err != nil {
+		if count >= 10000 {
 			continue
 		}
-		n, _ := res.RowsAffected()
-		if n == 0 {
+		if _, err = a.db.Exec("INSERT INTO events(session_id,id,state) VALUES(?,?,'pending')", s["id"], e.ID); err != nil {
 			continue
 		}
 		kind := e.Kind
@@ -108,22 +120,49 @@ func (a *App) collect(w http.ResponseWriter, r *http.Request) {
 			a.mu.Unlock()
 			text, err = a.reply(context.Background(), str(avatar, "persona"), e.Nickname, e.Text)
 			a.mu.Lock()
-			current := a.current()
+			current = a.current()
 			if current == nil || current["id"] != s["id"] || current["status"] != "live" {
+				_, _ = a.db.Exec("DELETE FROM events WHERE session_id=? AND id=? AND state='pending'", s["id"], e.ID)
 				break
 			}
 		}
 		if err == nil && text != "" {
 			err = a.task(s, e.ID, kind, text)
 		}
+		if err == nil {
+			var result sql.Result
+			result, err = a.db.Exec("UPDATE events SET state='done' WHERE session_id=? AND id=? AND state='pending'", s["id"], e.ID)
+			if err == nil {
+				var n int64
+				n, err = result.RowsAffected()
+				if n != 1 && err == nil {
+					err = fmt.Errorf("Lost event reservation")
+				}
+			}
+		}
 		if err != nil {
-			_, _ = a.db.Exec("DELETE FROM events WHERE session_id=? AND id=?", s["id"], e.ID)
+			_, _ = a.db.Exec("DELETE FROM events WHERE session_id=? AND id=? AND state='pending'", s["id"], e.ID)
 			continue
 		}
 		accepted++
-	} // Retain every accepted identity until stop; reject new IDs at the session cap.
-	write(w, 200, object{"accepted": accepted, "serverTime": a.c.Clock().UTC().Format(time.RFC3339Nano)})
+		outcomes[e.ID] = "processed"
+	}
+	processed, retry := []string{}, []string{}
+	seen := map[string]bool{}
+	for _, e := range b.Events {
+		if seen[e.ID] {
+			continue
+		}
+		seen[e.ID] = true
+		if outcomes[e.ID] == "processed" {
+			processed = append(processed, e.ID)
+		} else {
+			retry = append(retry, e.ID)
+		}
+	}
+	write(w, 200, object{"accepted": accepted, "processedIds": processed, "retryIds": retry, "serverTime": a.c.Clock().UTC().Format(time.RFC3339Nano)})
 }
+
 func (a *App) hostLoop() {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()

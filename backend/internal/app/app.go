@@ -83,6 +83,23 @@ func New(c Config) (http.Handler, error) {
 	if e != nil {
 		return nil, e
 	}
+	var stateColumn int
+	if e = db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('events') WHERE name='state'").Scan(&stateColumn); e != nil {
+		_ = db.Close()
+		return nil, e
+	}
+	if stateColumn == 0 {
+		if _, e = db.Exec("ALTER TABLE events ADD COLUMN state TEXT NOT NULL DEFAULT 'done' CHECK(state IN ('pending','done'))"); e != nil {
+			_ = db.Close()
+			return nil, e
+		}
+	}
+	// Pending work belonged to a handler lost with the previous business process.
+	// Replaying its stable task ID is safe against the Worker's session deduplication.
+	if _, e = db.Exec("DELETE FROM events WHERE state='pending'"); e != nil {
+		_ = db.Close()
+		return nil, e
+	}
 	a := &App{c: c, db: db, loc: loc, done: make(chan struct{})} // A restart must never assume an old worker stopped.
 	if s := a.current(); s != nil {
 		var status object
