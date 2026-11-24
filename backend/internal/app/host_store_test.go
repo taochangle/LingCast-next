@@ -83,3 +83,21 @@ func TestHostPlayedContext(t *testing.T) {
 		t.Fatal(in, e)
 	}
 }
+
+func TestPersonaWriteLimit(t *testing.T) {
+	f := newFixture(t)
+	for _, method := range []string{"POST", "PATCH"} {
+		path := "/api/avatars"
+		want := 201
+		if method == "PATCH" {
+			path += "/a1"
+			want = 200
+		}
+		for _, tc := range []struct{ length, status int }{{4096, want}, {4097, 400}} {
+			body := `{"name":"A","voiceId":"v","persona":"` + strings.Repeat("字", tc.length) + `"}`
+			if w := f.req(method, path, body, "a"); w.Code != tc.status {
+				t.Errorf("%s length %d: got %d, want %d", method, tc.length, w.Code, tc.status)
+			}
+		}
+	}
+}

@@ -2,6 +2,8 @@ package app
 
 import "time"
 
+const maxPersonaRunes = 4096
+
 type HostAngle struct {
 	ID   string `json:"id"`
 	Text string `json:"text"`

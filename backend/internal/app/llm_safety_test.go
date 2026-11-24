@@ -103,3 +103,44 @@ func TestModelToolCallAlongsideTextIsRejected(t *testing.T) {
 		t.Fatal("accepted model operation alongside speech")
 	}
 }
+
+func TestLegacyLongPersonaStillSpeaks(t *testing.T) {
+	f := newFixture(t)
+	prefix := strings.Repeat("字", 4096)
+	original := prefix + "历史尾部"
+	if e := f.a.put("avatars", object{"id": "legacy", "name": "A", "voiceId": "v", "persona": original}); e != nil {
+		t.Fatal(e)
+	}
+	h, e := New(f.a.c)
+	if e != nil {
+		t.Fatal(e)
+	}
+	a := h.(*App)
+	defer a.Close()
+	input, e := a.LoadHostContext("legacy", "")
+	if e != nil {
+		t.Fatal(e)
+	}
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct{ Messages []struct{ Content string } }
+		if e := json.NewDecoder(r.Body).Decode(&req); e != nil {
+			t.Error(e)
+			return
+		}
+		if len(req.Messages) != 2 || !strings.Contains(req.Messages[0].Content, prefix) || strings.Contains(req.Messages[0].Content, "历史尾部") {
+			t.Error("model-facing persona not bounded to 4096 Unicode characters")
+		}
+		write(w, 200, object{"choices": []object{{"message": object{"content": `{"action":"speak","text":"你好。"}`}}}})
+	}))
+	defer s.Close()
+	a.c.LLMURL = s.URL
+	if _, e := a.reply(context.Background(), original, "昵称", "你好"); e != nil {
+		t.Error(e)
+	}
+	if _, e := a.generateSpeech(context.Background(), input, "interaction"); e != nil {
+		t.Error(e)
+	}
+	if a.get("avatars", "legacy")["persona"] != original {
+		t.Fatal("migration or inference modified legacy persona")
+	}
+}

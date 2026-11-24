@@ -26,6 +26,9 @@ func migrateHost(db *sql.DB) error {
 	return tx.Commit()
 }
 func applyHostConfig(o, in object, newAvatar bool) error {
+	if persona, ok := in["persona"].(string); ok && utf8.RuneCountInString(persona) > maxPersonaRunes {
+		return errors.New("Persona exceeds 4096 characters")
+	}
 	if o["hostMode"] == nil {
 		o["hostMode"] = "fixed"
 		o["interests"] = []string{}

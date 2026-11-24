@@ -46,14 +46,19 @@ func (a *App) chatContent(ctx context.Context, system string, data any) (string,
 
 // Only administrator settings and the business clock can enter the system message.
 func hostSystem(in HostInput, rules string) string {
+	persona := in.Persona
+	// Older avatars may have longer personas. Preserve the stored text.
+	if utf8.RuneCountInString(persona) > maxPersonaRunes {
+		persona = string([]rune(persona)[:maxPersonaRunes])
+	}
 	config, _ := json.Marshal(struct {
 		Persona   string
 		Interests []string
-	}{in.Persona, in.Interests})
+	}{persona, in.Interests})
 	return fmt.Sprintf("%s\n管理员配置：%s\n服务器时间：%s %s %s", rules, config, in.ServerTime.Format("2006-01-02 15:04:05"), in.ServerTime.Weekday(), in.Timezone)
 }
 func validateModelContext(in HostInput) error {
-	if len(in.ViewerTurns) > 20 || len(in.SpokenTurns) > 12 || len(in.RecentTopicKeys) > 200 || utf8.RuneCountInString(in.Persona) > 4096 || len(in.Interests) > 5 {
+	if len(in.ViewerTurns) > 20 || len(in.SpokenTurns) > 12 || len(in.RecentTopicKeys) > 200 || len(in.Interests) > 5 {
 		return errors.New("Context exceeds limits")
 	}
 	for _, s := range in.Interests {
