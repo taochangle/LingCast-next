@@ -22,9 +22,10 @@ ARG PYTORCH_CU121_INDEX_URL=https://mirror.sjtu.edu.cn/pytorch-wheels/cu121
 ENV PIP_INDEX_URL=${PIP_INDEX_URL}
 # Whisper's source build imports pkg_resources from the pinned setuptools.
 RUN pip install --no-cache-dir torch==2.3.1+cu121 torchaudio==2.3.1+cu121 --index-url "${PYTORCH_CU121_INDEX_URL}" \
-    && pip install --no-cache-dir setuptools==75.8.2 wheel==0.45.1 packaging==24.2 cython==0.29.37 numpy==1.26.4 \
-    && DS_BUILD_OPS=0 pip install --no-cache-dir --no-build-isolation deepspeed==0.15.1 pyworld==0.3.4 \
+    && pip install --no-cache-dir setuptools==75.8.2 wheel==0.45.1 packaging==24.2 cython==0.29.37 numpy==1.26.4
+RUN pip install --no-cache-dir --no-build-isolation pyworld==0.3.4 \
     && pip install --no-cache-dir --no-deps --no-build-isolation openai-whisper==20231117 \
+    && pip install --no-cache-dir onnxruntime-gpu==1.18.0 --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/onnxruntime-cuda-12/pypi/simple/ \
     && pip install --no-cache-dir -r /tmp/tts/requirements.txt \
     && pip check
 WORKDIR /app
