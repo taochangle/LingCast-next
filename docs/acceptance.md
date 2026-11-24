@@ -42,3 +42,9 @@ python3 -m compileall -q worker services tests/integration
 | 平台转推 | 在另行获授权的非公开场次中显式开启和关闭转推，核对平台接收及停播清理。 |
 
 真实 GPU 推理、外部 RTMP、平台真实 DOM 和目标环境长期直播均属于实地项。此仓库的本地验收使用测试数据，无生产部署记录。
+
+## 最终审阅与复验
+
+最终代码 `5b3fcf8`：Go race/vet、React15项及构建、Python33项（含真实FFmpeg）、插件10项、五种Compose配置及完整CPU合成推理联调通过。整仓审阅三项Important均修复并复审通过。
+
+[持久化验证证据](verification/2026-11-24/README.md) 与 [实施默认及验收边界](implementation-notes.md)。本地分支保留；无推送、生产部署或真实平台评论/推流。
