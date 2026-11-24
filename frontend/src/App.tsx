@@ -462,7 +462,9 @@ export default function App() {
                       {session?.hostEnabled ? "暂停主持" : "恢复主持"}
                     </button>
                   </div>
-                  {running && session && <HostStatus sessionId={session.id} />}
+                  {running && session?.hostMode === "companion" && (
+                    <HostStatus sessionId={session.id} />
+                  )}
                   <div className="speechbox">
                     <Field label="手动口播内容">
                       <textarea

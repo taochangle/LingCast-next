@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api } from "../api";
+import { api, ApiError } from "../api";
 import { hostError, useHostRead } from "./useHostRead";
 
 type Topic = {
@@ -34,9 +34,40 @@ const states: Record<string, string> = {
 export default function HostContentManager(props: Props) {
   return <Content key={props.avatarId} {...props} />;
 }
-function Content({ avatarId, interests, onSaved }: Props) {
-  const path = `/avatars/${avatarId}/host-topics`;
-  const { data, error, refresh } = useHostRead<Topics>(path);
+function Content(props: Props) {
+  const path = `/avatars/${props.avatarId}/host-topics`;
+  const read = useHostRead<Topics>(path);
+  if (!read.data)
+    return (
+      <div className="host-content">
+        <h3>陪伴主持主题</h3>
+        {read.error ? (
+          <div role="alert">
+            {read.error} <button onClick={read.refresh}>重新读取</button>
+          </div>
+        ) : (
+          <p>正在读取主题…</p>
+        )}
+      </div>
+    );
+  return <TopicEditor {...props} {...read} path={path} data={read.data} />;
+}
+function TopicEditor({
+  avatarId,
+  interests,
+  onSaved,
+  path,
+  data,
+  error,
+  refresh,
+  reportError,
+}: Props & {
+  path: string;
+  data: Topics;
+  error: string;
+  refresh: () => void;
+  reportError: (error: unknown) => void;
+}) {
   const [draft, setDraft] = useState((interests || []).join("\n"));
   const [saved, setSaved] = useState(draft);
   const [edit, setEdit] = useState("");
@@ -50,7 +81,8 @@ function Content({ avatarId, interests, onSaved }: Props) {
     try {
       await action();
     } catch (e) {
-      setFailure(hostError(e));
+      if (e instanceof ApiError && e.status === 401) reportError(e);
+      else setFailure(hostError(e));
     } finally {
       setBusy(false);
       refresh();

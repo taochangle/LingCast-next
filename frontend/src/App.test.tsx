@@ -721,3 +721,28 @@ it("defaults new avatars to companion and limits live avatar edits to persona", 
     }),
   );
 });
+it("keeps fixed-session controls without requesting companion status", async () => {
+  const original = globalThis.fetch;
+  vi.stubGlobal("fetch", async (url: string, options: RequestInit) => {
+    if (url === "/api/live")
+      return new Response(
+        JSON.stringify({
+          session: {
+            id: "fixed",
+            avatarId: "a",
+            lookId: "la",
+            platform: "douyin",
+            status: "live",
+            hostEnabled: true,
+            hostMode: "fixed",
+          },
+        }),
+      );
+    return original(url, options);
+  });
+  render(<App />);
+  expect(await screen.findByRole("button", { name: "暂停主持" })).toBeEnabled();
+  expect(screen.getByLabelText("手动口播内容")).toBeEnabled();
+  expect(screen.queryByText("主持状态")).toBeNull();
+  expect(calls.some((call) => call.url.endsWith("/host-status"))).toBe(false);
+});

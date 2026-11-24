@@ -24,6 +24,10 @@ export function useHostRead<T>(path: string) {
   const [data, setData] = useState<T>();
   const [error, setError] = useState("");
   const [revision, setRevision] = useState(0);
+  function reportError(e: unknown) {
+    if (e instanceof ApiError && e.status === 401) setData(undefined);
+    setError(hostError(e));
+  }
   useEffect(() => {
     const controller = new AbortController();
     let active = true;
@@ -36,7 +40,7 @@ export function useHostRead<T>(path: string) {
           setError("");
         }
       } catch (e) {
-        if (active) setError(hostError(e));
+        if (active) reportError(e);
       } finally {
         if (active) timer = setTimeout(read, 3000);
       }
@@ -48,5 +52,10 @@ export function useHostRead<T>(path: string) {
       clearTimeout(timer);
     };
   }, [path, revision]);
-  return { data, error, refresh: () => setRevision((value) => value + 1) };
+  return {
+    data,
+    error,
+    reportError,
+    refresh: () => setRevision((value) => value + 1),
+  };
 }

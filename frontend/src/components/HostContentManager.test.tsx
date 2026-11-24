@@ -144,3 +144,18 @@ it("edits a topic using three plain-text angles", async () => {
     ),
   );
 });
+it("withdraws protected topics and controls when a later read loses authorization", async () => {
+  let revoked = false;
+  vi.stubGlobal("fetch", () =>
+    Promise.resolve(revoked ? json({}, 401) : json(wrapper("私人主题"))),
+  );
+  render(<HostContentManager avatarId="a" interests={["私人兴趣"]} />);
+  await screen.findByText("私人主题");
+  fireEvent.click(screen.getByRole("button", { name: "编辑主题" }));
+  revoked = true;
+  await screen.findByRole("alert", {}, { timeout: 4500 });
+  expect(screen.queryByText("私人主题")).toBeNull();
+  expect(screen.queryByDisplayValue("私人兴趣")).toBeNull();
+  expect(screen.queryByRole("button", { name: "保存主题" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "生成主题" })).toBeNull();
+});
