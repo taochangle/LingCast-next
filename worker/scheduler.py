@@ -34,7 +34,7 @@ class Scheduler:
         if (
             task["kind"] not in PRIORITY
             or not isinstance(task["text"], str)
-            or not 1 <= len(task["text"].strip()) <= 240
+            or (not task["text"].strip() or len(task["text"].encode("utf-8")) > 10000)
         ):
             raise ValueError("invalid task")
         if created > now + 5 or not isinstance(task["id"], str) or not task["id"]:

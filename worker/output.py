@@ -62,10 +62,12 @@ class LiveOutput:
                 raise RuntimeError("invalid idle media")
             return stdout
         finally:
-            terminate(process)
             with self.lifecycle:
-                if process in self.children:
+                owned = process in self.children
+                if owned:
                     self.children.remove(process)
+            if owned:
+                terminate(process)
 
     def start(self):
         import cv2
@@ -186,26 +188,31 @@ class LiveOutput:
                 os.close(ar)
 
     def alive(self):
+        process = self.proc
         return (
             not self.closed.is_set()
-            and self.proc is not None
-            and self.proc.poll() is None
+            and process is not None
+            and process.poll() is None
             and self.failure is None
         )
 
     def _write(self, fd, data):
+        process = self.proc
+        if process is None:
+            raise RuntimeError("output stopped")
         view = memoryview(data)
         deadline = time.monotonic() + 5
         while view:
-            if self.closed.is_set():
-                raise RuntimeError("output stopped")
-            if time.monotonic() > deadline or self.proc.poll() is not None:
-                raise RuntimeError("ffmpeg output stalled or exited")
-            if select.select([], [fd], [], 0.1)[1]:
-                try:
-                    view = view[os.write(fd, view) :]
-                except BlockingIOError:
-                    pass
+            with self.lifecycle:
+                if self.closed.is_set():
+                    raise RuntimeError("output stopped")
+                if time.monotonic() > deadline or process.poll() is not None:
+                    raise RuntimeError("ffmpeg output stalled or exited")
+                if select.select([], [fd], [], 0.1)[1]:
+                    try:
+                        view = view[os.write(fd, view) :]
+                    except BlockingIOError:
+                        pass
 
     def submit(self, pcm, frames, cancel):
         import numpy as np
@@ -244,6 +251,7 @@ class LiveOutput:
         renderer = threading.Thread(target=render_loop, daemon=True)
         renderer.start()
         index = 0
+        capture = None
         deadline = time.monotonic()
         try:
             while not cancel.is_set() and not self.closed.is_set():
@@ -252,12 +260,12 @@ class LiveOutput:
                     image, audio = self.packets.get_nowait()
                     speaking = True
                 except queue.Empty:
-                    if self.capture is None:
-                        self.capture = self.cv2.VideoCapture(str(self.paths[index]))
-                    ok, image = self.capture.read()
+                    if capture is None:
+                        capture = self.cv2.VideoCapture(str(self.paths[index]))
+                    ok, image = capture.read()
                     if not ok:
-                        self.capture.release()
-                        self.capture = None
+                        capture.release()
+                        capture = None
                         index = (index + 1) % len(self.paths)
                         continue
                     audio = bytes(1280)
@@ -272,59 +280,64 @@ class LiveOutput:
             if self.failure:
                 raise self.failure
         finally:
+            if capture is not None:
+                capture.release()
             self.stop()
-            renderer.join(timeout=95)
+            # Keep the session generation retiring until inference really exits.
+            renderer.join()
 
     def relay(self, data):
-        terminate(self.relay_proc)
-        self.relay_proc = None
-        if not data.get("enabled"):
-            return
-        server = data.get("server", "")
-        key = data.get("streamKey", "")
-        if (
-            urlsplit(server).scheme not in ("rtmp", "rtmps")
-            or not key
-            or any(c in server + key for c in "\r\n")
-        ):
-            raise ValueError("invalid relay destination")
-        if not self.alive():
-            raise RuntimeError("output unavailable")
-        self.relay_proc = subprocess.Popen(
-            [
-                "ffmpeg",
-                "-v",
-                "error",
-                "-nostdin",
-                "-i",
-                self.rtmp,
-                "-c",
-                "copy",
-                "-f",
-                "flv",
-                server.rstrip("/") + "/" + key,
-            ],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+        with self.lifecycle:
+            terminate(self.relay_proc)
+            self.relay_proc = None
+            if not data.get("enabled"):
+                return
+            server = data.get("server", "")
+            key = data.get("streamKey", "")
+            if (
+                urlsplit(server).scheme not in ("rtmp", "rtmps")
+                or not key
+                or any(c in server + key for c in "\r\n")
+            ):
+                raise ValueError("invalid relay destination")
+            if not self.alive():
+                raise RuntimeError("output unavailable")
+            self.relay_proc = subprocess.Popen(
+                [
+                    "ffmpeg",
+                    "-v",
+                    "error",
+                    "-nostdin",
+                    "-i",
+                    self.rtmp,
+                    "-c",
+                    "copy",
+                    "-f",
+                    "flv",
+                    server.rstrip("/") + "/" + key,
+                ],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
 
     def stop(self):
         self.closed.set()
         with self.lifecycle:
-            for child in list(self.children):
-                terminate(child)
-            terminate(self.relay_proc)
-            self.relay_proc = None
-        # Terminate before touching stdin: writes may still be in progress.
-        terminate(self.proc)
-        self.proc = None
-        if self.audio is not None:
+            children, self.children = self.children, []
+            relay, self.relay_proc = self.relay_proc, None
+            process, self.proc = self.proc, None
+            audio, self.audio = self.audio, None
+            self.video = None
+        # Detach each resource once before slow process teardown; concurrent
+        # HTTP stop and writer-finally cannot close a reused descriptor.
+        for child in children:
+            terminate(child)
+        terminate(relay)
+        terminate(process)
+        if audio is not None:
             try:
-                os.close(self.audio)
+                os.close(audio)
             except OSError:
                 pass
-            self.audio = None
-        if self.capture is not None:
-            self.capture.release()
-            self.capture = None
+        # The writer exclusively owns VideoCapture.read/release.

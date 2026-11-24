@@ -31,6 +31,7 @@ class SessionManager:
         self.last_completed = None
         self.last_stopped = None
         self.preparing = False
+        self.retiring = None
 
     def _check(self, sid):
         if (
@@ -42,8 +43,13 @@ class SessionManager:
 
     def start(self, payload):
         with self.lock:
-            if self.preparing or (
-                self.current and self.current["status"] in ("starting", "live", "error")
+            if (
+                (self.retiring is not None and self.retiring.is_alive())
+                or self.preparing
+                or (
+                    self.current
+                    and self.current["status"] in ("starting", "live", "error")
+                )
             ):
                 raise FileExistsError("session already active")
             for key in ("sessionId", "avatarId", "lookId", "voiceId"):
@@ -87,6 +93,8 @@ class SessionManager:
                 if item is default:
                     self.base = path
                     self.sha = item["sha256"]
+            if self.cancel.is_set():
+                raise ValueError("start cancelled")
             self.models.prepare(payload["lookId"], self.base, self.sha)
             with self.lock:
                 if self.cancel.is_set():
@@ -144,9 +152,13 @@ class SessionManager:
             output = self.output
             sha = self.sha
         try:
-            for pcm, frames in self.models.render(
-                current["lookId"], current["voiceId"], task["text"], sha
-            ):
+            args = (current["lookId"], current["voiceId"], task["text"], sha)
+            stream = (
+                self.models.render(*args, cancel=cancel)
+                if hasattr(self.models, "cancel_render")
+                else self.models.render(*args)
+            )
+            for pcm, frames in stream:
                 if cancel.is_set():
                     return False
                 output.submit(pcm, frames, cancel)
@@ -176,6 +188,8 @@ class SessionManager:
                     status="error", error=type(error).__name__ + ": live output failed"
                 )
             self.cancel.set()
+            if hasattr(self.models, "cancel_render"):
+                self.models.cancel_render()
             if self.output:
                 self.output.stop()
 
@@ -193,6 +207,8 @@ class SessionManager:
 
     def _cleanup(self):
         self.cancel.set()
+        if hasattr(self.models, "cancel_render"):
+            self.models.cancel_render()
         if self.output:
             self.output.stop()
             self.output = None
@@ -214,11 +230,13 @@ class SessionManager:
                 self.last_stopped = sid
                 return
             self._check(sid)
+            retiring = self.thread
+            self.retiring = retiring
             self._cleanup()
             self.current["status"] = "stopped"
             self.last_stopped = sid
-        if self.thread and self.thread is not threading.current_thread():
-            self.thread.join(timeout=95)
+        if retiring and retiring is not threading.current_thread():
+            retiring.join(timeout=5)
 
     def close(self):
         with self.lock:
@@ -234,7 +252,8 @@ class SessionManager:
                     error=None,
                     queueDepth=0,
                     speaking=False,
-                    preparing=self.preparing,
+                    preparing=self.preparing
+                    or (self.retiring is not None and self.retiring.is_alive()),
                 )
             if (
                 self.current["status"] == "live"
@@ -250,5 +269,6 @@ class SessionManager:
                 queueDepth=len(self.queue),
                 speaking=self.speaking,
                 lastTaskCompletedAt=self.last_completed,
-                preparing=self.preparing,
+                preparing=self.preparing
+                or (self.retiring is not None and self.retiring.is_alive()),
             )

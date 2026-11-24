@@ -78,7 +78,7 @@ def handler(manager, token):
                                 self.wfile.flush()
                         return
                 size = int(self.headers.get("Content-Length", "0"))
-                if not 0 <= size <= 16384:
+                if not 0 <= size <= 65536:
                     raise ValueError("request too large")
                 data = json.loads(self.rfile.read(size)) if size else {}
                 if method == "POST" and self.path == "/sessions":

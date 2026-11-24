@@ -2,8 +2,11 @@
 
 import base64
 import hashlib
+import http.client
 import json
 import os
+import socket
+import threading
 from pathlib import Path
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -105,6 +108,8 @@ class ModelClient:
         self.render_token = render_token
         self.tts_url = tts_url.rstrip("/")
         self.tts_token = tts_token
+        self.transport_lock = threading.Lock()
+        self.active_render = {}
 
     def request(self, url, token, data=None, timeout=60):
         body = None if data is None else json.dumps(data).encode()
@@ -150,11 +155,77 @@ class ModelClient:
             if not json.load(response).get("ready"):
                 raise RuntimeError("look preparation failed")
 
-    def render(self, look, voice, text, sha):
-        with self.request(
-            self.render_url + "/render",
-            self.render_token,
-            dict(lookId=look, voiceId=voice, text=text, sha256=sha),
-            timeout=90,
-        ) as response:
-            yield from paired_packets(bounded_lines(response))
+    def cancel_render(self):
+        with self.transport_lock:
+            active = list(self.active_render.items())
+        for connection, transport in active:
+            sock = transport or connection.sock
+            if sock is not None:
+                try:
+                    sock.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+            connection.close()
+
+    def render(self, look, voice, text, sha, cancel=None):
+        # Keep exact input, including whitespace; only transport/model windows split.
+        remaining = text
+        while remaining:
+            if cancel is not None and cancel.is_set():
+                return
+            cut = min(240, len(remaining))
+            if len(remaining) > cut:
+                for position in range(cut, 119, -1):
+                    if remaining[position - 1] in "。！？；.!?;\n":
+                        cut = position
+                        break
+            chunk, remaining = remaining[:cut], remaining[cut:]
+            yield from self._render_chunk(look, voice, chunk, sha, cancel)
+
+    def _render_chunk(self, look, voice, text, sha, cancel=None):
+        target = urlsplit(self.render_url + "/render")
+        if target.scheme not in ("http", "https"):
+            raise ValueError("model requires HTTP URL")
+        connection_type = (
+            http.client.HTTPSConnection
+            if target.scheme == "https"
+            else http.client.HTTPConnection
+        )
+        connection = connection_type(target.hostname, target.port, timeout=5)
+        with self.transport_lock:
+            if cancel is not None and cancel.is_set():
+                return
+            self.active_render[connection] = None
+        try:
+            body = json.dumps(
+                dict(lookId=look, voiceId=voice, text=text, sha256=sha)
+            ).encode()
+            connection.request(
+                "POST",
+                target.path,
+                body=body,
+                headers={
+                    "Authorization": "Bearer " + self.render_token,
+                    "Content-Type": "application/json",
+                },
+            )
+            with self.transport_lock:
+                transport = connection.sock
+                self.active_render[connection] = transport
+            if transport is not None:
+                transport.settimeout(90)
+            if cancel is not None and cancel.is_set():
+                return
+            response = connection.getresponse()
+            if response.status != 200:
+                raise RuntimeError("renderer unavailable")
+            # Retain the original socket even when HTTP/1.0 detaches it from
+            # HTTPConnection; shutdown interrupts the response's buffered reader.
+            try:
+                yield from paired_packets(bounded_lines(response))
+            finally:
+                response.close()
+        finally:
+            with self.transport_lock:
+                self.active_render.pop(connection, None)
+            connection.close()
