@@ -28,4 +28,5 @@ RUN pip install --no-cache-dir torch==2.0.1+cu118 torchvision==0.15.2+cu118 torc
 WORKDIR /app
 COPY services/common.py ./services/common.py
 COPY services/lipsync ./services/lipsync
+COPY worker/models.py ./worker/models.py
 CMD ["python", "-m", "services.lipsync.app"]
