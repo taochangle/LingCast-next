@@ -6,6 +6,7 @@ services:
       args:
         DOCKER_IMAGE_PREFIX: ${DOCKER_IMAGE_PREFIX-}
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
+        APT_MIRROR: ${APT_MIRROR-https://mirrors.tuna.tsinghua.edu.cn}
     depends_on:
       - srs
     ports:
@@ -43,6 +44,7 @@ services:
         DOCKER_IMAGE_PREFIX: ${DOCKER_IMAGE_PREFIX-}
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
         PYTORCH_CU121_INDEX_URL: ${PYTORCH_CU121_INDEX_URL:-https://mirror.sjtu.edu.cn/pytorch-wheels/cu121}
+        APT_MIRROR: ${APT_MIRROR-https://mirrors.tuna.tsinghua.edu.cn}
     deploy:
       resources:
         reservations:
@@ -79,6 +81,7 @@ services:
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
         PYTORCH_CU118_INDEX_URL: ${PYTORCH_CU118_INDEX_URL:-https://mirror.sjtu.edu.cn/pytorch-wheels/cu118}
         MMCV_WHEEL_INDEX_URL: ${MMCV_WHEEL_INDEX_URL:-https://download.openmmlab.com/mmcv/dist/cu118/torch2.0.0/index.html}
+        APT_MIRROR: ${APT_MIRROR-https://mirrors.tuna.tsinghua.edu.cn}
     deploy:
       resources:
         reservations:

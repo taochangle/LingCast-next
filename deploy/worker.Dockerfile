@@ -1,6 +1,9 @@
 ARG DOCKER_IMAGE_PREFIX=docker.1ms.run/
 FROM ${DOCKER_IMAGE_PREFIX}library/python:3.12-slim-bookworm
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg ca-certificates \
+ARG APT_MIRROR=https://mirrors.tuna.tsinghua.edu.cn
+COPY deploy/configure-apt.sh /tmp/configure-apt.sh
+RUN sh /tmp/configure-apt.sh "${APT_MIRROR}" \
+    && apt-get update && apt-get install -y --no-install-recommends ffmpeg ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY worker/requirements.txt /tmp/worker-requirements.txt

@@ -57,12 +57,18 @@ AI 独立也可以连接远程模型。设置两个远程模型地址后，运�
 
 ```dotenv
 DOCKER_IMAGE_PREFIX=docker.1ms.run/
+APT_MIRROR=https://mirrors.tuna.tsinghua.edu.cn
+APK_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/alpine
+NPM_REGISTRY=https://registry.npmmirror.com
+GOPROXY=https://goproxy.cn
 PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
 PYTORCH_CU121_INDEX_URL=https://mirror.sjtu.edu.cn/pytorch-wheels/cu121
 PYTORCH_CU118_INDEX_URL=https://mirror.sjtu.edu.cn/pytorch-wheels/cu118
 ```
 
 `DOCKER_IMAGE_PREFIX` 是带末尾 `/` 的前缀，覆盖全部 Docker 基础镜像和 SRS。设为 `DOCKER_IMAGE_PREFIX=` 或删除该项，Compose 就使用 Docker Hub 官方镜像地址，不会回退到镜像站。也可以换成其他兼容 Docker Hub 的镜像前缀。
+
+Ubuntu/Debian 的系统包安装前统一改用 `APT_MIRROR`，Alpine 用 `APK_MIRROR`；两项显式留空可保留基础镜像原有源。npm 默认 npmmirror，Go 模块默认 goproxy.cn，校验文件和 Go checksum 校验仍然保留。NVIDIA 基础镜像自带的 CUDA 专用 APT 源保持原配置。
 
 普通 Python 包使用[清华 PyPI 镜像](https://mirrors.tuna.tsinghua.edu.cn/help/pypi/)，CUDA 版本的 PyTorch 使用[上海交大 PyTorch 镜像](https://mirror.sjtu.edu.cn/docs/pytorch-wheels)。两种 CUDA 索引分别匹配已锁定的依赖，不能改为普通 PyPI 地址。MMCV 保留匹配 CUDA 11.8 / torch 2.0 的专用 wheel 目录，也可通过 `MMCV_WHEEL_INDEX_URL` 修改。需要官方 pip 源时显式设置 `PIP_INDEX_URL=https://pypi.org/simple`，PyTorch 分别设置 `https://download.pytorch.org/whl/cu121` 和 `https://download.pytorch.org/whl/cu118`。修改这些构建参数后重新 `docker compose ... build`；已有镜像不受 `.env` 的事后修改影响。
 

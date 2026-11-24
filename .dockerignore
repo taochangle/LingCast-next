@@ -7,6 +7,8 @@
 !services/**
 !worker/
 !worker/**
+!deploy/
+!deploy/configure-apt.sh
 **/node_modules/
 **/dist/
 **/__pycache__/

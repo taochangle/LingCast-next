@@ -1,6 +1,9 @@
 ARG DOCKER_IMAGE_PREFIX=docker.1ms.run/
 FROM ${DOCKER_IMAGE_PREFIX}nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04@sha256:85fb7ac694079fff1061a0140fd5b5a641997880e12112d92589c3bbb1e8b7ca
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+ARG APT_MIRROR=https://mirrors.tuna.tsinghua.edu.cn
+COPY deploy/configure-apt.sh /tmp/configure-apt.sh
+RUN sh /tmp/configure-apt.sh "${APT_MIRROR}" \
+    && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     python3.10 python3.10-venv git ffmpeg libsndfile1 libgl1 libglib2.0-0 ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 RUN python3.10 -m venv /opt/venv
