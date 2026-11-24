@@ -1,0 +1,91 @@
+services:
+  worker:
+    build:
+      context: .
+      dockerfile: deploy/worker.Dockerfile
+    depends_on:
+      - srs
+    ports:
+      - "${WORKER_BIND_ADDRESS:-127.0.0.1}:${WORKER_HOST_PORT:-8090}:8090"
+    environment:
+      WORKER_TOKEN: ${WORKER_TOKEN:?Set WORKER_TOKEN}
+      TTS_URL: ${TTS_URL:?Set TTS_URL}
+      TTS_TOKEN: ${TTS_TOKEN:?Set TTS_TOKEN}
+      LIPSYNC_URL: ${LIPSYNC_URL:?Set LIPSYNC_URL}
+      LIPSYNC_TOKEN: ${LIPSYNC_TOKEN:?Set LIPSYNC_TOKEN}
+      WORKER_CACHE_DIR: /cache/worker
+      SRS_RTMP_URL: "rtmp://srs:1935/live/{sessionId}"
+      SRS_HTTP_URL: http://srs:8080
+    volumes:
+      - worker-cache:/cache/worker
+    networks:
+      - default
+      - streaming
+
+  srs:
+    image: ossrs/srs:5@sha256:5ed957dbebc48da42e928cebbc9446bced1c5afc58f816e122ce36d370af0113
+    command: ["./objs/srs", "-c", "/etc/lingcast/srs.conf"]
+    volumes:
+      - ./deploy/srs.conf:/etc/lingcast/srs.conf:ro
+    networks:
+      - streaming
+
+  tts:
+    profiles: [models]
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: deploy/tts.Dockerfile
+    gpus: all
+    ports:
+      - "${TTS_BIND_ADDRESS:-127.0.0.1}:${TTS_HOST_PORT:-8091}:8091"
+    environment:
+      TTS_TOKEN: ${TTS_TOKEN:?Set TTS_TOKEN}
+    volumes:
+      - type: bind
+        source: ${COSYVOICE_WEIGHTS_DIR:-./models/cosyvoice}
+        target: /models/CosyVoice3
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${TTS_DATA_DIR:-./data/tts}
+        target: /data
+        read_only: true
+        bind:
+          create_host_path: false
+
+  lipsync:
+    profiles: [models]
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: deploy/lipsync.Dockerfile
+    gpus: all
+    ports:
+      - "${LIPSYNC_BIND_ADDRESS:-127.0.0.1}:${LIPSYNC_HOST_PORT:-8092}:8092"
+    environment:
+      LIPSYNC_TOKEN: ${LIPSYNC_TOKEN:?Set LIPSYNC_TOKEN}
+      TTS_URL: ${TTS_URL:?Set TTS_URL}
+      TTS_TOKEN: ${TTS_TOKEN:?Set TTS_TOKEN}
+    volumes:
+      - musetalk-cache:/cache/musetalk
+      - type: bind
+        source: ${MUSETALK_WEIGHTS_DIR:-./models/musetalk}
+        target: /cache/musetalk/models
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${LIPSYNC_DATA_DIR:-./data/lipsync}
+        target: /data
+        bind:
+          create_host_path: false
+
+networks:
+  streaming:
+    internal: true
+
+volumes:
+  worker-cache:
+  musetalk-cache:

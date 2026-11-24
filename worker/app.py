@@ -73,7 +73,7 @@ def handler(manager, token):
                             self.send_header("Content-Type", "video/x-flv")
                             self.send_header("Cache-Control", "no-store")
                             self.end_headers()
-                            while chunk := response.read(65536):
+                            while chunk := response.read1(65536):
                                 self.wfile.write(chunk)
                                 self.wfile.flush()
                         return

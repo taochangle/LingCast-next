@@ -1,0 +1,14 @@
+**
+!backend/
+!backend/**
+!frontend/
+!frontend/**
+!services/
+!services/**
+!worker/
+!worker/**
+**/node_modules/
+**/dist/
+**/__pycache__/
+**/.env
+**/.env.*
