@@ -918,3 +918,14 @@ details[open] .chevron {
     flex-direction: column;
   }
 }
+
+.material-shortcut {
+  display: flex;
+  min-height: 32px;
+}
+.material-guidance {
+  margin-bottom: 12px;
+}
+.idle-list {
+  scroll-margin-top: 18px;
+}

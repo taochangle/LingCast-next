@@ -617,3 +617,39 @@ it("explains a failed startup and takes the operator to service checks", async (
   fireEvent.click(screen.getByRole("button", { name: "前往服务设置" }));
   expect(screen.getByRole("button", { name: "检查服务连接" })).toBeVisible();
 });
+
+it("opens the selected look's idle uploads directly from broadcast preparation", async () => {
+  const original = globalThis.fetch;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((path, options) => {
+      if (path === "/api/looks/la/idles")
+        return Promise.resolve(
+          new Response(
+            JSON.stringify([{ id: "i", lookId: "la", mediaId: "现有底片" }]),
+          ),
+        );
+      return original(path, options);
+    }),
+  );
+  render(<App />);
+  fireEvent.change(await screen.findByLabelText("直播人物"), {
+    target: { value: "a" },
+  });
+  await screen.findByRole("option", { name: "春装" });
+  fireEvent.change(screen.getByLabelText("直播形象"), {
+    target: { value: "la" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "上传 / 更换底片" }));
+  expect(await screen.findByText("现有底片")).toBeVisible();
+  expect(screen.getByLabelText("人物名称")).toHaveValue("小林");
+  expect(screen.getByLabelText("形象名称")).toHaveValue("春装");
+  expect(
+    screen.getByRole("region", { name: "口型底片与待机视频" }),
+  ).toHaveFocus();
+  expect(screen.getByLabelText(/上传底片 \/ 待机视频/)).toHaveAttribute(
+    "type",
+    "file",
+  );
+  expect(screen.getByRole("button", { name: "默认底片" })).toBeDisabled();
+});

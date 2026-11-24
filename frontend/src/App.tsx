@@ -122,6 +122,10 @@ export default function App() {
     (sessionStorage.getItem(tokenKey) || "").trim(),
   );
   const [connected, setConnected] = useState(!!token);
+  const [materialTarget, setMaterialTarget] = useState<{
+    avatarId: string;
+    lookId: string;
+  } | null>(null);
   const [page, setPage] = useState("studio");
   const [avatars, setAvatars] = useState<Avatar[]>([]);
   const [avatarId, setAvatarId] = useState("");
@@ -214,20 +218,29 @@ export default function App() {
     };
   }, [connected, refresh, readLive]);
   useEffect(() => {
-    setLooks([]);
     setLookId("");
+  }, [displayedAvatar]);
+  useEffect(() => {
+    if (page !== "studio") return;
+    setLooks([]);
     if (!displayedAvatar) return;
     let cancelled = false;
     api<Look[]>(`/avatars/${displayedAvatar}/looks`)
-      .then((v) => {
-        if (!cancelled)
-          setLooks(v.filter((l) => l.avatarId === displayedAvatar));
+      .then((result) => {
+        if (cancelled) return;
+        const available = result.filter((l) => l.avatarId === displayedAvatar);
+        setLooks(available);
+        setLookId((previous) =>
+          available.some((l) => l.id === previous) ? previous : "",
+        );
       })
-      .catch((e) => setError(e.message));
+      .catch((e) => {
+        if (!cancelled) setError(e.message);
+      });
     return () => {
       cancelled = true;
     };
-  }, [displayedAvatar]);
+  }, [displayedAvatar, page]);
   if (!connected)
     return (
       <div className="login">
@@ -274,7 +287,10 @@ export default function App() {
               aria-label={label}
               aria-current={page === key ? "page" : undefined}
               className={page === key ? "selected" : ""}
-              onClick={() => setPage(key)}
+              onClick={() => {
+                setMaterialTarget(null);
+                setPage(key);
+              }}
             >
               <Icon />
               {key === "avatars" ? (
@@ -513,7 +529,10 @@ export default function App() {
                 <button
                   className="text"
                   disabled={busy}
-                  onClick={() => setPage("avatars")}
+                  onClick={() => {
+                    setMaterialTarget(null);
+                    setPage("avatars");
+                  }}
                 >
                   管理人物与素材 <ArrowRight />
                 </button>
@@ -531,6 +550,19 @@ export default function App() {
                 </div>
                 <p className="hint">
                   给形象指定一条静音待机视频，作为生成口型的默认底片。
+                  <button
+                    className="text material-shortcut"
+                    disabled={busy}
+                    onClick={() => {
+                      setMaterialTarget({
+                        avatarId: displayedAvatar,
+                        lookId: displayedLook,
+                      });
+                      setPage("avatars");
+                    }}
+                  >
+                    上传 / 更换底片 <ArrowRight />
+                  </button>
                 </p>
                 {running ? (
                   <button
@@ -706,6 +738,7 @@ export default function App() {
         )}
         {page === "avatars" && (
           <AvatarManager
+            initialTarget={materialTarget}
             avatars={avatars}
             refresh={refresh}
             act={act}
@@ -796,6 +829,7 @@ export default function App() {
 }
 type Action = (fn: () => Promise<void>) => Promise<void>;
 function AvatarManager({
+  initialTarget,
   avatars,
   refresh,
   act,
@@ -807,11 +841,16 @@ function AvatarManager({
   act: Action;
   busy: boolean;
   lockedAvatar: string;
+  initialTarget: { avatarId: string; lookId: string } | null;
 }) {
-  const [id, setId] = useState("");
-  const [name, setName] = useState("");
-  const [persona, setPersona] = useState("");
-  const [voiceId, setVoice] = useState("");
+  const initialAvatar = avatars.find((a) => a.id === initialTarget?.avatarId);
+  const [id, setId] = useState(initialAvatar?.id || "");
+  const [name, setName] = useState(initialAvatar?.name || "");
+  const [persona, setPersona] = useState(initialAvatar?.persona || "");
+  const [voiceId, setVoice] = useState(initialAvatar?.voiceId || "");
+  const targetLook = useRef(initialTarget?.lookId);
+  const focusUpload = useRef(Boolean(initialTarget?.lookId));
+  const uploadSection = useRef<HTMLDivElement>(null);
   const [looks, setLooks] = useState<Look[]>([]);
   const [look, setLook] = useState<Look | null>(null);
   const [lookName, setLookName] = useState("");
@@ -845,8 +884,18 @@ function AvatarManager({
             !cancelled &&
             version === looksVersion.current &&
             currentAvatar.current === id
-          )
+          ) {
             setLooks(result);
+            const target = result.find(
+              (l) => l.id === targetLook.current && l.avatarId === id,
+            );
+            if (target) {
+              setLook(target);
+              setLookName(target.name);
+              setImage(target.imageId);
+            }
+            targetLook.current = undefined;
+          }
         })
         .catch((e) => {
           if (!cancelled)
@@ -905,7 +954,18 @@ function AvatarManager({
       cancelled = true;
     };
   }, [look?.imageId]);
+  useEffect(() => {
+    if (!look || !focusUpload.current || !uploadSection.current) return;
+    focusUpload.current = false;
+    uploadSection.current.focus({ preventScroll: true });
+    uploadSection.current.scrollIntoView?.({
+      block: "start",
+      behavior: "instant",
+    });
+  }, [look?.id]);
   const choose = (a?: Avatar) => {
+    targetLook.current = undefined;
+    focusUpload.current = false;
     setId(a?.id || "");
     setName(a?.name || "");
     setPersona(a?.persona || "");
@@ -924,6 +984,13 @@ function AvatarManager({
             新建人物
           </button>
         </div>
+        {initialTarget && !look && (
+          <p className="hint material-guidance">
+            {id
+              ? "选择或新建一个形象，即可上传该形象的口型底片。"
+              : "先选择或创建人物，再选择形象并上传口型底片。"}
+          </p>
+        )}
         {avatars.length ? (
           avatars.map((a) => (
             <button
@@ -1126,8 +1193,14 @@ function AvatarManager({
               </div>
             </form>
             {look && (
-              <div className="idle-list">
-                <h3>静音待机视频</h3>
+              <div
+                className="idle-list"
+                role="region"
+                aria-label="口型底片与待机视频"
+                tabIndex={-1}
+                ref={uploadSection}
+              >
+                <h3>口型底片与待机视频</h3>
                 {idles.length === 0 && (
                   <p className="empty">
                     还没有待机视频。上传后选择一条作为默认口型底片。
@@ -1173,7 +1246,7 @@ function AvatarManager({
                     </button>
                   </div>
                 ))}
-                <Field label="添加静音视频（最大 200 MiB）">
+                <Field label="上传底片 / 待机视频（静音，最大 200 MiB）">
                   <input
                     type="file"
                     accept="video/*"
