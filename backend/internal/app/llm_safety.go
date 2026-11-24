@@ -80,12 +80,22 @@ func (a *App) generateSpeech(ctx context.Context, in HostInput, source string) (
 	if err := validateModelContext(in); err != nil {
 		return "", err
 	}
-	raw, err := a.chatContent(ctx, hostSystem(in, speechRules), object{"source": source, "currentAngleId": in.CurrentAngleID, "currentTopic": in.CurrentTopic, "spokenTurns": in.SpokenTurns, "viewerTurns": in.ViewerTurns, "recentTopicKeys": in.RecentTopicKeys})
+	rules := speechRules
+	if source == "host" {
+		rules += " 围绕currentAngleId对应的角度讲40至120字，1至3句，避免复读。"
+	}
+	raw, err := a.chatContent(ctx, hostSystem(in, rules), object{"suggestedInterests": in.SuggestedInterests, "source": source, "currentAngleId": in.CurrentAngleID, "currentTopic": in.CurrentTopic, "spokenTurns": in.SpokenTurns, "viewerTurns": in.ViewerTurns, "recentTopicKeys": in.RecentTopicKeys})
 	if err != nil {
 		return "", err
 	}
-	return parseSpeech(raw)
+	text, err := parseSpeech(raw)
+	if err != nil {
+		return "", errSpeechFormat
+	}
+	return text, nil
 }
+
+var errSpeechFormat = errors.New("Invalid speech decision")
 
 // Exact, case-sensitive keys. Reject duplicates, null, and trailing JSON.
 func modelFields(raw string, allowed ...string) (map[string]json.RawMessage, error) {
@@ -147,7 +157,11 @@ func (a *App) CheckGeneratedSpeech(ctx context.Context, c SpeechCandidate) (Safe
 	if err := validateModelContext(c.Context); err != nil {
 		return deny, err
 	}
-	raw, e := a.chatContent(ctx, auditRules, object{"source": c.Source, "text": c.Text, "currentTopic": c.Context.CurrentTopic, "viewerTurns": c.Context.ViewerTurns, "spokenTurns": c.Context.SpokenTurns})
+	return a.auditMaterial(ctx, object{"source": c.Source, "text": c.Text, "currentTopic": c.Context.CurrentTopic, "viewerTurns": c.Context.ViewerTurns, "spokenTurns": c.Context.SpokenTurns})
+}
+func (a *App) auditMaterial(ctx context.Context, data any) (SafetyDecision, error) {
+	deny := SafetyDecision{Category: "unsafe-content"}
+	raw, e := a.chatContent(ctx, auditRules, data)
 	if e != nil {
 		return deny, e
 	}

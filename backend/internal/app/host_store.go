@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -17,6 +18,7 @@ func migrateHost(db *sql.DB) error {
 	defer tx.Rollback()
 	_, e = tx.Exec(`CREATE TABLE IF NOT EXISTS host_topics(id TEXT PRIMARY KEY, avatar_id TEXT NOT NULL, topic_key TEXT NOT NULL, title TEXT NOT NULL, angles TEXT NOT NULL, state TEXT NOT NULL, created_at INTEGER NOT NULL);
  CREATE INDEX IF NOT EXISTS host_topics_avatar ON host_topics(avatar_id,created_at);
+ CREATE TABLE IF NOT EXISTS host_recent_keys(avatar_id TEXT NOT NULL, key TEXT NOT NULL, seen_at INTEGER NOT NULL, PRIMARY KEY(avatar_id,key));
  CREATE TABLE IF NOT EXISTS host_runs(session_id TEXT PRIMARY KEY, avatar_id TEXT NOT NULL,topic_id TEXT NOT NULL DEFAULT '',angle_id TEXT NOT NULL DEFAULT '',last_seq INTEGER NOT NULL DEFAULT 0);
  CREATE TABLE IF NOT EXISTS host_tasks(session_id TEXT NOT NULL,task_id TEXT NOT NULL,source TEXT NOT NULL,topic_id TEXT NOT NULL,angle_id TEXT NOT NULL,state TEXT NOT NULL DEFAULT 'pending',PRIMARY KEY(session_id,task_id));
  CREATE TABLE IF NOT EXISTS host_turns(session_id TEXT NOT NULL,task_id TEXT NOT NULL,source TEXT NOT NULL DEFAULT 'spoken',text TEXT NOT NULL,completed_at INTEGER NOT NULL,seq INTEGER NOT NULL,PRIMARY KEY(session_id,task_id));
@@ -73,14 +75,19 @@ func applyHostConfig(o, in object, newAvatar bool) error {
 func (a *App) LoadHostContext(avatarID, sessionID string) (HostInput, error) {
 	in := HostInput{AvatarID: avatarID, SessionID: sessionID, ServerTime: a.c.Clock().In(a.loc), Timezone: a.c.Timezone}
 	var persona sql.NullString
-	var interests string
-	err := a.db.QueryRow(`SELECT json_extract(body,'$.persona'),COALESCE(json_extract(body,'$.interests'),'[]'),COALESCE(json_extract(body,'$.revision'),1) FROM objects WHERE kind='avatars' AND id=?`, avatarID).Scan(&persona, &interests, &in.Revision)
+	var interests, suggestions string
+	err := a.db.QueryRow(`SELECT json_extract(body,'$.persona'),COALESCE(json_extract(body,'$.interests'),'[]'),COALESCE(json_extract(body,'$.revision'),1),COALESCE(json_extract(body,'$.suggestedInterests'),'[]') FROM objects WHERE kind='avatars' AND id=?`, avatarID).Scan(&persona, &interests, &in.Revision, &suggestions)
 	if err != nil {
 		return in, err
 	}
 	in.Persona = persona.String
 	if err = json.Unmarshal([]byte(interests), &in.Interests); err != nil {
 		return in, err
+	}
+	if len(in.Interests) == 0 {
+		if err = json.Unmarshal([]byte(suggestions), &in.SuggestedInterests); err != nil {
+			return in, err
+		}
 	}
 	if sessionID != "" {
 		var owner string
@@ -122,7 +129,7 @@ func (a *App) LoadHostContext(avatarID, sessionID string) (HostInput, error) {
 			return in, err
 		}
 	}
-	rows, err := a.db.Query(`SELECT topic_key FROM host_topics WHERE avatar_id=? AND created_at>=? ORDER BY created_at DESC LIMIT 200`, avatarID, in.ServerTime.Add(-7*24*time.Hour).Unix())
+	rows, err := a.db.Query(`SELECT key FROM (SELECT topic_key AS key,created_at AS ts FROM host_topics WHERE avatar_id=? UNION ALL SELECT key,seen_at FROM host_recent_keys WHERE avatar_id=?) WHERE ts>=? GROUP BY key ORDER BY MAX(ts) DESC,key LIMIT 200`, avatarID, avatarID, in.ServerTime.Add(-7*24*time.Hour).Unix())
 	if err != nil {
 		return in, err
 	}
@@ -232,6 +239,13 @@ func (a *App) ApplyTaskResults(sessionID string, page TaskResultsPage) error {
 	if err != nil {
 		return err
 	}
+	var owner string
+	if err = tx.QueryRow("SELECT avatar_id FROM host_runs WHERE session_id=?", sessionID).Scan(&owner); err != nil {
+		return err
+	}
+	if err = pruneHostTx(tx, owner, a.c.Clock()); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
@@ -270,6 +284,40 @@ func applyPlayback(tx *sql.Tx, sid string, r TaskResult) error {
 	if err != nil || n == 0 {
 		return err
 	}
+	var owner, key, angleText string
+	if err = tx.QueryRow(`SELECT t.avatar_id,t.topic_key,json_extract(j.value,'$.text') FROM host_topics t,json_each(t.angles) j WHERE t.id=? AND json_extract(j.value,'$.id')=?`, topic, angle).Scan(&owner, &key, &angleText); err != nil {
+		return err
+	}
+	for _, k := range []string{key, key + "/" + speechKey(angleText)} {
+		if _, err = tx.Exec("INSERT INTO host_recent_keys VALUES(?,?,?) ON CONFLICT(avatar_id,key) DO UPDATE SET seen_at=MAX(seen_at,excluded.seen_at)", owner, k, r.CompletedAt.Unix()); err != nil {
+			return err
+		}
+	}
 	_, err = tx.Exec(`UPDATE host_runs SET topic_id=?,angle_id=? WHERE session_id=?`, topic, angle, sid)
 	return err
+}
+
+func (a *App) pruneHostHistory(ctx context.Context, avatar string) error {
+	tx, e := a.db.BeginTx(ctx, nil)
+	if e != nil {
+		return e
+	}
+	defer tx.Rollback()
+	if e = pruneHostTx(tx, avatar, a.c.Clock()); e != nil {
+		return e
+	}
+	return tx.Commit()
+}
+func pruneHostTx(tx *sql.Tx, avatar string, now time.Time) error {
+	cutoff := now.Add(-7 * 24 * time.Hour).Unix()
+	_, e := tx.Exec(`DELETE FROM host_recent_keys WHERE avatar_id=? AND (seen_at<? OR rowid NOT IN(SELECT rowid FROM host_recent_keys WHERE avatar_id=? ORDER BY seen_at DESC,rowid DESC LIMIT 200))`, avatar, cutoff, avatar)
+	if e != nil {
+		return e
+	}
+	_, e = tx.Exec(`DELETE FROM host_topics WHERE avatar_id=? AND state!='ready' AND id NOT IN (SELECT r.topic_id FROM host_runs r JOIN objects o ON o.id=r.session_id AND o.kind='sessions' WHERE r.avatar_id=host_topics.avatar_id AND json_extract(o.body,'$.status')='live') AND (created_at<? OR id NOT IN(SELECT id FROM host_topics WHERE avatar_id=? ORDER BY created_at DESC,rowid DESC LIMIT 200))`, avatar, cutoff, avatar)
+	if e != nil {
+		return e
+	}
+	_, e = tx.Exec(`DELETE FROM host_turns WHERE session_id IN(SELECT session_id FROM host_runs WHERE avatar_id=?) AND (completed_at<? OR (source='host' AND rowid NOT IN(SELECT t.rowid FROM host_turns t JOIN host_runs r USING(session_id) WHERE r.avatar_id=? AND source='host' ORDER BY completed_at DESC,t.rowid DESC LIMIT 100)) OR (source!='host' AND rowid NOT IN(SELECT t.rowid FROM host_turns t JOIN host_runs r USING(session_id) WHERE r.avatar_id=? AND source!='host' ORDER BY completed_at DESC,t.rowid DESC LIMIT 12)))`, avatar, cutoff, avatar, avatar)
+	return e
 }

@@ -26,15 +26,16 @@ type Config struct {
 	Clock                                                                                                                   func() time.Time
 }
 type App struct {
-	done      chan struct{}
-	closeOnce sync.Once
-	c         Config
-	db        *sql.DB
-	mu        sync.Mutex
-	loc       *time.Location
-	cancel    context.CancelFunc
-	lastHost  time.Time
-	hostIndex int
+	done         chan struct{}
+	closeOnce    sync.Once
+	c            Config
+	db           *sql.DB
+	mu           sync.Mutex
+	loc          *time.Location
+	cancel       context.CancelFunc
+	lastHost     time.Time
+	hostIndex    int
+	topicFlights map[string]*topicFlight
 }
 type object map[string]any
 
@@ -190,6 +191,10 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(p) < 2 {
 		http.NotFound(w, r)
+		return
+	}
+	if (p[1] == "avatars" && len(p) >= 4 && p[3] == "host-topics") || p[1] == "host-topics" {
+		a.hostTopicsAPI(w, r, p)
 		return
 	}
 	switch p[1] {

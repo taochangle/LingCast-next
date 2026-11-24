@@ -44,18 +44,19 @@ type SpokenTurn struct {
 	Text   string `json:"text"`
 }
 type HostInput struct {
-	CurrentAngleID  string       `json:"currentAngleId"`
-	AvatarID        string       `json:"avatarId"`
-	SessionID       string       `json:"sessionId"`
-	Revision        int64        `json:"revision"`
-	Persona         string       `json:"persona"`
-	Interests       []string     `json:"interests"`
-	ServerTime      time.Time    `json:"serverTime"`
-	Timezone        string       `json:"timezone"`
-	CurrentTopic    *HostTopic   `json:"currentTopic"`
-	SpokenTurns     []SpokenTurn `json:"spokenTurns"`
-	ViewerTurns     []ViewerTurn `json:"viewerTurns"`
-	RecentTopicKeys []string     `json:"recentTopicKeys"`
+	SuggestedInterests []string     `json:"suggestedInterests,omitempty"`
+	CurrentAngleID     string       `json:"currentAngleId"`
+	AvatarID           string       `json:"avatarId"`
+	SessionID          string       `json:"sessionId"`
+	Revision           int64        `json:"revision"`
+	Persona            string       `json:"persona"`
+	Interests          []string     `json:"interests"`
+	ServerTime         time.Time    `json:"serverTime"`
+	Timezone           string       `json:"timezone"`
+	CurrentTopic       *HostTopic   `json:"currentTopic"`
+	SpokenTurns        []SpokenTurn `json:"spokenTurns"`
+	ViewerTurns        []ViewerTurn `json:"viewerTurns"`
+	RecentTopicKeys    []string     `json:"recentTopicKeys"`
 }
 type SpeechCandidate struct {
 	Source  string    `json:"source"`
