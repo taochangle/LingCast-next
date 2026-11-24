@@ -205,6 +205,14 @@ func (a *App) topicJobStatus(avatar string) object {
 	}
 	return out
 }
+
+// Unconfirmed topics retain their IDs for late receipts. Only topics the
+// director can actually select consume slots in the usable ready reserve.
+const selectableHostTopic = `NOT EXISTS (
+ SELECT 1 FROM host_tasks h WHERE h.topic_id=t.id AND h.state IN ('pending','unknown')
+)`
+const readyHostTopicCount = "SELECT COUNT(*) FROM host_topics t WHERE t.avatar_id=? AND t.state='ready' AND " + selectableHostTopic
+
 func (a *App) generateReserve(ctx context.Context, in HostInput, manual bool) ([]HostTopic, error) {
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
@@ -212,7 +220,7 @@ func (a *App) generateReserve(ctx context.Context, in HostInput, manual bool) ([
 		return nil, e
 	}
 	var count int
-	if e := a.db.QueryRowContext(ctx, "SELECT count(*) FROM host_topics WHERE avatar_id=? AND state='ready'", in.AvatarID).Scan(&count); e != nil {
+	if e := a.db.QueryRowContext(ctx, readyHostTopicCount, in.AvatarID).Scan(&count); e != nil {
 		return nil, e
 	}
 	if count >= 36 || (!manual && count >= 4) {
@@ -284,7 +292,7 @@ func (a *App) generateReserve(ctx context.Context, in HostInput, manual bool) ([
 			return nil, e
 		}
 		defer tx.Rollback()
-		if e = tx.QueryRow("SELECT COUNT(*) FROM host_topics WHERE avatar_id=? AND state='ready'", in.AvatarID).Scan(&count); e != nil {
+		if e = tx.QueryRow(readyHostTopicCount, in.AvatarID).Scan(&count); e != nil {
 			return nil, e
 		}
 		if count >= 36 || (!manual && count >= 4) {

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -138,42 +139,162 @@ func TestSlowLLMDoesNotBlockStop(t *testing.T) {
 		t.Fatal("generation did not cancel")
 	}
 }
-func TestLateGenerationCannotCrossSession(t *testing.T) {
-	f, sid := directorFixture(t)
-	entered, release := make(chan struct{}), make(chan struct{})
-	modelFixture(t, f.a, func(string) string { close(entered); <-release; return `{"action":"speak","text":"过期草稿"}` })
-	done := make(chan error, 1)
-	go func() { done <- f.a.CompanionTick(context.Background(), sid) }()
-	<-entered
-	f.req("PATCH", "/api/live/"+sid+"/host", `{"enabled":false}`, "a")
-	f.req("POST", "/api/live/"+sid+"/stop", "", "a")
-	if r := f.start(); r.Code != 201 {
-		t.Fatal(r.Body.String())
+
+const directorSpeech = "如果把树叶放在白纸上，细细看它边缘的起伏，会发现一片叶子也有自己的轮廓。换个方向再看，也许能找到另一种有趣的形状。"
+
+func approvedDirectorResponse(system string) string {
+	if system == auditRules {
+		return `{"allow":true,"category":"safe"}`
 	}
-	close(release)
-	<-done
-	if len(f.tasks) != 0 || str(f.a.current(), "id") == sid {
-		t.Fatal(f.tasks)
+	return `{"action":"speak","text":"` + directorSpeech + `"}`
+}
+
+func TestLateGenerationCannotCrossSession(t *testing.T) {
+	for _, transition := range []string{"pause-resume", "replace"} {
+		t.Run(transition, func(t *testing.T) {
+			f, sid := directorFixture(t)
+			entered, release := make(chan struct{}), make(chan struct{})
+			modelFixture(t, f.a, func(system string) string {
+				if system == auditRules {
+					close(entered)
+					<-release
+				}
+				return approvedDirectorResponse(system)
+			})
+			done := make(chan error, 1)
+			go func() { done <- f.a.CompanionTick(context.Background(), sid) }()
+			select {
+			case <-entered:
+			case <-time.After(2 * time.Second):
+				close(release)
+				t.Fatal("valid speech did not reach audit")
+			}
+			if transition == "pause-resume" {
+				for _, payload := range []string{`{"enabled":false}`, `{"enabled":true}`} {
+					if r := f.req("PATCH", "/api/live/"+sid+"/host", payload, "a"); r.Code != 200 {
+						close(release)
+						t.Fatal(r.Body.String())
+					}
+				}
+				if str(f.a.current(), "id") != sid {
+					close(release)
+					t.Fatal("session changed")
+				}
+			} else {
+				if r := f.req("POST", "/api/live/"+sid+"/stop", "", "a"); r.Code != 200 {
+					close(release)
+					t.Fatal(r.Body.String())
+				}
+				r := f.req("POST", "/api/live", `{"avatarId":"a1","lookId":"l1","platform":"douyin","hostMode":"companion"}`, "a")
+				if r.Code != 201 || str(f.a.current(), "id") == sid {
+					close(release)
+					t.Fatal(r.Body.String())
+				}
+				if r = f.req("PATCH", "/api/live/"+str(f.a.current(), "id")+"/host", `{"enabled":true}`, "a"); r.Code != 200 {
+					close(release)
+					t.Fatal(r.Body.String())
+				}
+			}
+			close(release)
+			<-done
+			if len(f.tasks) != 0 {
+				t.Fatal("stale draft submitted", f.tasks)
+			}
+		})
 	}
 }
+
 func TestManualStopAfterHour(t *testing.T) {
 	f, sid := directorFixture(t)
 	later := f.a.c.Clock().Add(65 * time.Minute)
 	f.a.c.Clock = func() time.Time { return later }
-	modelFixture(t, f.a, func(string) string { return `{"action":"skip"}` })
-	if err := f.a.CompanionTick(context.Background(), sid); err == nil {
-		t.Fatal("missing generation failure")
+	modelFixture(t, f.a, approvedDirectorResponse)
+	if err := f.a.CompanionTick(context.Background(), sid); err != nil {
+		t.Fatal(err)
 	}
-	status := f.a.CompanionStatus(sid)
-	if status.State != "degraded" || status.LastError == "" || !status.NextEligibleAt.Equal(later.Add(5*time.Second)) || str(f.a.current(), "status") != "live" {
-		t.Fatal(status)
+	if len(f.tasks) != 1 || str(f.tasks[0], "text") != directorSpeech || f.a.current()["status"] != "live" {
+		t.Fatal(f.tasks, f.a.current())
+	}
+	if r := f.req("POST", "/api/live/"+sid+"/stop", "", "a"); r.Code != 200 || f.a.current() != nil {
+		t.Fatal(r.Body.String())
+	}
+}
+
+func TestDirectorFailureBackoff(t *testing.T) {
+	f, sid := directorFixture(t)
+	now := f.a.c.Clock()
+	f.a.c.Clock = func() time.Time { return now }
+	modelFixture(t, f.a, func(string) string { return `{"action":"skip"}` })
+	for _, seconds := range []int{5, 15, 30, 60, 60} {
+		if err := f.a.CompanionTick(context.Background(), sid); err == nil {
+			t.Fatal("missing generation failure")
+		}
+		status := f.a.CompanionStatus(sid)
+		if status.State != "degraded" || status.LastError == "" || status.NextEligibleAt == nil || !status.NextEligibleAt.Equal(now.Add(time.Duration(seconds)*time.Second)) {
+			t.Fatal(status)
+		}
+		if err := f.a.CompanionTick(context.Background(), sid); err != nil {
+			t.Fatal("tick retried early", err)
+		}
+		now = *status.NextEligibleAt
 	}
 	r := f.req("GET", "/api/live/"+sid+"/host-status", "", "a")
-	if r.Code != 200 || !strings.Contains(r.Body.String(), "degraded") {
-		t.Fatal(r.Body.String())
+	if r.Code != 200 || !strings.Contains(r.Body.String(), "degraded") || len(f.tasks) != 0 {
+		t.Fatal(r.Body.String(), f.tasks)
 	}
-	if r = f.req("POST", "/api/live/"+sid+"/stop", "", "a"); r.Code != 200 {
-		t.Fatal(r.Body.String())
+}
+
+func TestDirectorRefillsQuarantinedReserve(t *testing.T) {
+	for _, count := range []int{4, 36} {
+		t.Run(fmt.Sprint(count), func(t *testing.T) {
+			f, sid := directorFixture(t)
+			for i := 4; i < count; i++ {
+				k := fmt.Sprintf("held%d", i)
+				_, e := f.a.db.Exec(`INSERT INTO host_topics SELECT ?,avatar_id,?,title,angles,state,created_at FROM host_topics WHERE id='a'`, k, k)
+				if e != nil {
+					t.Fatal(e)
+				}
+			}
+			topics, e := f.a.listTopics("a1")
+			if e != nil {
+				t.Fatal(e)
+			}
+			for _, topic := range topics {
+				if e := f.a.RegisterPlayback(sid, "lost-"+topic.ID, "host", topic.ID, "one"); e != nil {
+					t.Fatal(e)
+				}
+			}
+			if e := f.a.ApplyTaskResults(sid, TaskResultsPage{Results: []TaskResult{{Seq: 3, TaskID: "other", State: "failed"}}, NextSeq: 3, Truncated: true}); e != nil {
+				t.Fatal(e)
+			}
+			modelFixture(t, f.a, func(system string) string {
+				if strings.Contains(system, "topics 为12个") {
+					return topicFixture()
+				}
+				return approvedDirectorResponse(system)
+			})
+			if e := f.a.CompanionTick(context.Background(), sid); e != nil {
+				t.Fatal(e)
+			}
+			if len(f.tasks) != 1 || str(f.tasks[0], "text") != directorSpeech {
+				t.Fatal(f.tasks)
+			}
+			var unknown int
+			if e = f.a.db.QueryRow("SELECT count(*) FROM host_tasks WHERE session_id=? AND state='unknown'", sid).Scan(&unknown); e != nil || unknown != count {
+				t.Fatal(unknown, e)
+			}
+			in, e := f.a.LoadHostContext("a1", sid)
+			if e != nil || in.CurrentAngleID != "" {
+				t.Fatal(in, e)
+			}
+			if e = f.a.RecordPlayed(sid, TaskResult{Seq: 4, TaskID: "lost-a", State: "completed", Text: "后来收到的完成回执", CompletedAt: f.a.c.Clock()}); e != nil {
+				t.Fatal(e)
+			}
+			in, e = f.a.LoadHostContext("a1", sid)
+			if e != nil || in.CurrentTopic == nil || in.CurrentTopic.ID != "a" || in.CurrentAngleID != "one" {
+				t.Fatal(in, e)
+			}
+		})
 	}
 }
 func TestRestartDoesNotReplayUnknown(t *testing.T) {

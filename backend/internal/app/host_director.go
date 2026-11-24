@@ -107,11 +107,11 @@ func (a *App) selectHostAngle(in *HostInput) error {
 		}
 		// A missing terminal receipt leaves this topic unresolved. Another
 		// topic can continue without implying the unknown angle was spoken.
-		var uncertain bool
-		if e = a.db.QueryRow("SELECT EXISTS(SELECT 1 FROM host_tasks WHERE session_id=? AND topic_id=? AND state IN ('unknown','pending'))", in.SessionID, t.ID).Scan(&uncertain); e != nil {
+		var selectable bool
+		if e = a.db.QueryRow("SELECT "+selectableHostTopic+" FROM host_topics t WHERE t.id=?", t.ID).Scan(&selectable); e != nil {
 			return e
 		}
-		if uncertain {
+		if !selectable {
 			continue
 		}
 		for _, angle := range t.Angles {
