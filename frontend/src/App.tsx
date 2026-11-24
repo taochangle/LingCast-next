@@ -36,6 +36,9 @@ import type {
   Platform,
 } from "./types";
 import MediaImage from "./components/MediaImage";
+import HostContentManager from "./components/HostContentManager";
+import HostStatus from "./components/HostStatus";
+import type { HostMode } from "./types";
 import Preview from "./components/Preview";
 const navigation = [
   {
@@ -147,6 +150,13 @@ export default function App() {
   } | null>(null);
   const running = active(session);
   const displayedAvatar = running && session ? session.avatarId : avatarId;
+  const [modeChoice, setModeChoice] = useState<HostMode | null>(null);
+  const selectedMode =
+    running && session
+      ? session.hostMode || "fixed"
+      : modeChoice ||
+        avatars.find((a) => a.id === avatarId)?.hostMode ||
+        "fixed";
   const displayedLook = running && session ? session.lookId : lookId;
   // A read may finish after a command; only the current generation can update live state.
   const liveVersion = useRef(0);
@@ -452,6 +462,7 @@ export default function App() {
                       {session?.hostEnabled ? "暂停主持" : "恢复主持"}
                     </button>
                   </div>
+                  {running && session && <HostStatus sessionId={session.id} />}
                   <div className="speechbox">
                     <Field label="手动口播内容">
                       <textarea
@@ -490,7 +501,10 @@ export default function App() {
                     aria-label="直播人物"
                     value={displayedAvatar}
                     disabled={running || busy}
-                    onChange={(e) => setAvatarId(e.target.value)}
+                    onChange={(e) => {
+                      setAvatarId(e.target.value);
+                      setModeChoice(null);
+                    }}
                   >
                     <option value="">请选择人物</option>
                     {avatars.map((a) => (
@@ -515,6 +529,12 @@ export default function App() {
                     ))}
                   </select>
                 </Field>
+                <ModeSelect
+                  label="本场主持模式"
+                  value={selectedMode}
+                  disabled={running || busy || !avatarId}
+                  onChange={setModeChoice}
+                />
                 <Field label="直播平台">
                   <select
                     aria-label="直播平台"
@@ -592,7 +612,12 @@ export default function App() {
                         const r = await api<{
                           session: Session;
                           collectorToken: string;
-                        }>("/live", "POST", { avatarId, lookId, platform });
+                        }>("/live", "POST", {
+                          avatarId,
+                          lookId,
+                          platform,
+                          hostMode: selectedMode,
+                        });
                         acceptSession(r.session);
                         setCollector(r.collectorToken);
                         setCollectorSession(r.session.id);
@@ -747,7 +772,12 @@ export default function App() {
           />
         )}
         {page === "scripts" && (
-          <ScriptManager avatars={avatars} act={act} busy={busy} />
+          <ScriptManager
+            avatars={avatars}
+            act={act}
+            busy={busy}
+            refresh={refresh}
+          />
         )}
         {page === "settings" && (
           <section className="panel settings">
@@ -828,6 +858,31 @@ export default function App() {
   );
 }
 type Action = (fn: () => Promise<void>) => Promise<void>;
+function ModeSelect({
+  label,
+  value,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  value: HostMode;
+  disabled: boolean;
+  onChange: (v: HostMode) => void;
+}) {
+  return (
+    <Field label={label}>
+      <select
+        aria-label={label}
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value as HostMode)}
+      >
+        <option value="companion">陪伴主持</option>
+        <option value="fixed">固定稿主持</option>
+      </select>
+    </Field>
+  );
+}
 function AvatarManager({
   initialTarget,
   avatars,
@@ -848,6 +903,10 @@ function AvatarManager({
   const [name, setName] = useState(initialAvatar?.name || "");
   const [persona, setPersona] = useState(initialAvatar?.persona || "");
   const [voiceId, setVoice] = useState(initialAvatar?.voiceId || "");
+  const [mode, setMode] = useState<HostMode>(
+    initialAvatar ? initialAvatar.hostMode || "fixed" : "companion",
+  );
+  const locked = Boolean(id && id === lockedAvatar);
   const targetLook = useRef(initialTarget?.lookId);
   const focusUpload = useRef(Boolean(initialTarget?.lookId));
   const uploadSection = useRef<HTMLDivElement>(null);
@@ -967,6 +1026,7 @@ function AvatarManager({
     targetLook.current = undefined;
     focusUpload.current = false;
     setId(a?.id || "");
+    setMode(a ? a.hostMode || "fixed" : "companion");
     setName(a?.name || "");
     setPersona(a?.persona || "");
     setVoice(a?.voiceId || "");
@@ -1019,7 +1079,9 @@ function AvatarManager({
                 const a = await api<Avatar>(
                   id ? `/avatars/${id}` : "/avatars",
                   id ? "PATCH" : "POST",
-                  { name, persona, voiceId },
+                  locked
+                    ? { persona }
+                    : { name, persona, voiceId, hostMode: mode },
                 );
                 await refresh();
                 setId(a.id);
@@ -1030,6 +1092,7 @@ function AvatarManager({
               <Field label="人物名称">
                 <input
                   required
+                  disabled={locked}
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                 />
@@ -1037,12 +1100,19 @@ function AvatarManager({
               <Field label="音色 ID">
                 <input
                   required
+                  disabled={locked}
                   value={voiceId}
                   onChange={(e) => setVoice(e.target.value)}
                   placeholder="与模型服务音色配置一致"
                 />
               </Field>
             </div>
+            <ModeSelect
+              label="默认主持模式"
+              value={mode}
+              disabled={busy || locked}
+              onChange={setMode}
+            />
             <Field label="人物人设">
               <textarea
                 rows={4}
@@ -1286,10 +1356,12 @@ function AvatarManager({
   );
 }
 function ScriptManager({
+  refresh,
   avatars,
   act,
   busy,
 }: {
+  refresh: () => Promise<void>;
   avatars: Avatar[];
   act: Action;
   busy: boolean;
@@ -1346,7 +1418,7 @@ function ScriptManager({
           <p className="empty">选择人物，查看独立话术库。</p>
         ) : scripts.length === 0 ? (
           <p className="empty">
-            话术库为空，人物将保持待机。添加主持稿后可按序循环。
+            暂无固定话术。添加主持稿后可在固定稿模式下按序循环。
           </p>
         ) : (
           Object.entries(kinds)
@@ -1449,6 +1521,13 @@ function ScriptManager({
             )}
           </div>
         </form>
+        {avatar && (
+          <HostContentManager
+            avatarId={avatar}
+            interests={avatars.find((a) => a.id === avatar)?.interests}
+            onSaved={refresh}
+          />
+        )}
       </section>
     </fieldset>
   );

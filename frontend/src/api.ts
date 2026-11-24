@@ -1,8 +1,17 @@
 export const tokenKey = "lingcast.admin";
+export class ApiError extends Error {
+  constructor(
+    public status: number,
+    detail: string,
+  ) {
+    super(detail);
+  }
+}
 export async function api<T>(
   path: string,
   method = "GET",
   body?: unknown,
+  signal?: AbortSignal,
 ): Promise<T> {
   const headers: Record<string, string> = {
     Authorization: `Bearer ${(sessionStorage.getItem(tokenKey) || "").trim()}`,
@@ -11,6 +20,7 @@ export async function api<T>(
     headers["Content-Type"] = "application/json";
   const res = await fetch(`/api${path}`, {
     method,
+    ...(signal && { signal }),
     headers,
     body:
       body === undefined
@@ -25,7 +35,7 @@ export async function api<T>(
       const data = await res.json();
       message = data.error || message;
     } catch {}
-    throw new Error(message);
+    throw new ApiError(res.status, message);
   }
   if (res.status === 204) return undefined as T;
   const text = await res.text();

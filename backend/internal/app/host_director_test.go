@@ -238,6 +238,9 @@ func TestDirectorFailureBackoff(t *testing.T) {
 		}
 		now = *status.NextEligibleAt
 	}
+	if unauthorized := f.req("GET", "/api/live/"+sid+"/host-status", "", ""); unauthorized.Code != 401 {
+		t.Fatalf("host status without admin token: %d", unauthorized.Code)
+	}
 	r := f.req("GET", "/api/live/"+sid+"/host-status", "", "a")
 	if r.Code != 200 || !strings.Contains(r.Body.String(), "degraded") || len(f.tasks) != 0 {
 		t.Fatal(r.Body.String(), f.tasks)

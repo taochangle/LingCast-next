@@ -1,8 +1,11 @@
+export type HostMode = "fixed" | "companion";
 export interface Avatar {
   id: string;
   name: string;
   persona: string;
   voiceId: string;
+  hostMode?: HostMode;
+  interests?: string[];
 }
 export interface Look {
   id: string;
@@ -31,6 +34,7 @@ export interface Session {
   platform: Platform;
   status: string;
   hostEnabled: boolean;
+  hostMode?: HostMode;
   relayState?: "disabled" | "launching" | "running" | "failed" | "unknown";
   previewUrl: string;
   error: string;

@@ -88,11 +88,18 @@ it("requires selections and scopes looks to avatar; start includes platform with
   fireEvent.change(screen.getByLabelText("直播平台"), {
     target: { value: "xiaohongshu" },
   });
+  expect(screen.getByLabelText("本场主持模式")).toHaveValue("fixed");
+  fireEvent.change(screen.getByLabelText("本场主持模式"), {
+    target: { value: "companion" },
+  });
   fireEvent.click(start);
   await waitFor(() =>
     expect(
       calls.some(
-        (c) => c.url === "/api/live" && c.body?.platform === "xiaohongshu",
+        (c) =>
+          c.url === "/api/live" &&
+          c.body?.platform === "xiaohongshu" &&
+          c.body?.hostMode === "companion",
       ),
     ).toBe(true),
   );
@@ -668,4 +675,49 @@ it("opens the selected look's idle uploads directly from broadcast preparation",
   expect(
     screen.getByRole("region", { name: "口型底片与待机视频" }),
   ).toHaveFocus();
+});
+it("defaults new avatars to companion and limits live avatar edits to persona", async () => {
+  const original = globalThis.fetch;
+  vi.stubGlobal("fetch", async (url: string, options: RequestInit) => {
+    if (url === "/api/live")
+      return new Response(
+        JSON.stringify({
+          session: {
+            id: "s",
+            avatarId: "a",
+            lookId: "la",
+            platform: "douyin",
+            status: "live",
+            hostEnabled: true,
+            hostMode: "companion",
+          },
+        }),
+      );
+    if (url === "/api/avatars/a" && options.method === "PATCH") {
+      calls.push({ url, body: JSON.parse(String(options.body)) });
+      return new Response(JSON.stringify({ id: "a" }));
+    }
+    return original(url, options);
+  });
+  render(<App />);
+  const liveMode = await screen.findByLabelText("本场主持模式");
+  await waitFor(() => expect(liveMode).toHaveValue("companion"));
+  expect(liveMode).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "人物与素材" }));
+  expect(screen.getByLabelText("默认主持模式")).toHaveValue("companion");
+  fireEvent.click(await screen.findByRole("button", { name: /小林/ }));
+  expect(screen.getByLabelText("默认主持模式")).toHaveValue("fixed");
+  expect(screen.getByLabelText("默认主持模式")).toBeDisabled();
+  expect(screen.getByLabelText("人物名称")).toBeDisabled();
+  expect(screen.getByLabelText("音色 ID")).toBeDisabled();
+  fireEvent.change(screen.getByLabelText("人物人设"), {
+    target: { value: "喜欢花草" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "保存人物" }));
+  await waitFor(() =>
+    expect(calls).toContainEqual({
+      url: "/api/avatars/a",
+      body: { persona: "喜欢花草" },
+    }),
+  );
 });
