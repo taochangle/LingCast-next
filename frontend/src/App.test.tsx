@@ -620,9 +620,15 @@ it("explains a failed startup and takes the operator to service checks", async (
 
 it("opens the selected look's idle uploads directly from broadcast preparation", async () => {
   const original = globalThis.fetch;
+  let resolveMetadata!: (media: { url: string }) => void;
+  const delayedMetadata = new Promise<{ url: string }>((resolve) => {
+    resolveMetadata = resolve;
+  });
   vi.stubGlobal(
     "fetch",
     vi.fn((path, options) => {
+      if (path === "/api/media/img")
+        return delayedMetadata.then((m) => new Response(JSON.stringify(m)));
       if (path === "/api/looks/la/idles")
         return Promise.resolve(
           new Response(
@@ -652,4 +658,14 @@ it("opens the selected look's idle uploads directly from broadcast preparation",
     "file",
   );
   expect(screen.getByRole("button", { name: "默认底片" })).toBeDisabled();
+  const previewFrame = screen.getByRole("figure", { name: "形象图预览" });
+  expect(previewFrame).toHaveClass("material-image-frame");
+  expect(screen.queryByAltText("已上传的形象图")).toBeNull();
+  resolveMetadata({ url: "/media/portrait.png" });
+  expect(previewFrame).toContainElement(
+    await screen.findByAltText("已上传的形象图"),
+  );
+  expect(
+    screen.getByRole("region", { name: "口型底片与待机视频" }),
+  ).toHaveFocus();
 });

@@ -1157,12 +1157,22 @@ function AvatarManager({
                   }}
                 />
               </Field>
-              {imageUrl && (
-                <img
-                  className="material-image"
-                  src={imageUrl}
-                  alt="已上传的形象图"
-                />
+              {imageId && (
+                <figure
+                  className="material-image-frame"
+                  aria-label="形象图预览"
+                >
+                  {imageUrl ? (
+                    <img
+                      className="material-image"
+                      src={imageUrl}
+                      alt="已上传的形象图"
+                      onError={() => setImageUrl("")}
+                    />
+                  ) : (
+                    <span className="hint">暂无图片预览</span>
+                  )}
+                </figure>
               )}
               <p className="hint">
                 {imageId ? "形象图已选择" : "请先上传形象图"}
