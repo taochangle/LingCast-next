@@ -81,18 +81,23 @@
       function include(row) {
         if (row && rows.size < dedupLimit) rows.add(row);
       }
+      function includeDescendants(element) {
+        if (rows.size >= dedupLimit) return;
+        for (const row of element.querySelectorAll(adapter.selector)) {
+          if (rows.size >= dedupLimit) break;
+          include(row);
+        }
+      }
       for (const record of records) {
         const target = record.target.nodeType === 1 ? record.target : record.target.parentElement;
         const owner = target?.closest(adapter.selector);
         if (owner && root.contains(owner)) include(owner);
+        if (record.type === 'attributes' && target && root.contains(target)) includeDescendants(target);
         for (const node of record.addedNodes) {
           if (node.nodeType !== 1 || (node.isConnected && !root.contains(node))) continue;
           // A row added inside the room can already be detached by the next DOM commit.
           if (node.matches(adapter.selector)) include(node);
-          for (const row of node.querySelectorAll(adapter.selector)) {
-            if (rows.size >= dedupLimit) break;
-            include(row);
-          }
+          includeDescendants(node);
         }
       }
       for (const row of rows) queue.inspect(row);

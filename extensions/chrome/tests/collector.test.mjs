@@ -242,6 +242,33 @@ test('only reads the known XHS region, captures fast removal and attribute chang
   assert.deepEqual([...messages[2].events.map(event => event.id)], [second.id]);
   await upload();
   assert.deepEqual(data(messages[3].events), []);
+  response = events => ({ ok: true, processedIds: events.map(event => event.id) });
+  const hidden = document.createElement('div');
+  const revealed = row('revealed');
+  revealed.className = 'msg-wrapper role-user';
+  hidden.hidden = true;
+  hidden.append(revealed);
+  const enter = document.createElement('div');
+  enter.innerHTML = '<div class="msg-content"><span class="nickname">visitor</span><span>来了</span></div>';
+  root.append(hidden, enter);
+  await settle();
+  await upload();
+  assert.deepEqual(data(messages.at(-1).events), []);
+
+  hidden.hidden = false;
+  enter.className = 'enter-msgs';
+  await settle();
+  await upload();
+  assert.deepEqual(data(messages.at(-1).events.map(({ kind, nickname, text }) => ({ kind, nickname, text }))), [
+    { kind: 'comment', nickname: 'reader', text: 'revealed' },
+    { kind: 'enter', nickname: 'visitor', text: '' },
+  ]);
+  hidden.className = 'updated-wrapper';
+  enter.classList.add('updated-wrapper');
+  await settle();
+  await upload();
+  assert.deepEqual(data(messages.at(-1).events), []);
+
   response = () => ({ ok: false, stop: true });
   await upload();
   assert.equal(upload, null);
