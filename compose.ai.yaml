@@ -3,6 +3,9 @@ services:
     build:
       context: .
       dockerfile: deploy/worker.Dockerfile
+      args:
+        DOCKER_IMAGE_PREFIX: ${DOCKER_IMAGE_PREFIX-}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
     depends_on:
       - srs
     ports:
@@ -23,7 +26,7 @@ services:
       - streaming
 
   srs:
-    image: ossrs/srs:5@sha256:5ed957dbebc48da42e928cebbc9446bced1c5afc58f816e122ce36d370af0113
+    image: ${DOCKER_IMAGE_PREFIX-}ossrs/srs:5@sha256:5ed957dbebc48da42e928cebbc9446bced1c5afc58f816e122ce36d370af0113
     command: ["./objs/srs", "-c", "/etc/lingcast/srs.conf"]
     volumes:
       - ./deploy/srs.conf:/etc/lingcast/srs.conf:ro
@@ -36,6 +39,10 @@ services:
     build:
       context: .
       dockerfile: deploy/tts.Dockerfile
+      args:
+        DOCKER_IMAGE_PREFIX: ${DOCKER_IMAGE_PREFIX-}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
+        PYTORCH_CU121_INDEX_URL: ${PYTORCH_CU121_INDEX_URL:-https://mirror.sjtu.edu.cn/pytorch-wheels/cu121}
     deploy:
       resources:
         reservations:
@@ -67,6 +74,11 @@ services:
     build:
       context: .
       dockerfile: deploy/lipsync.Dockerfile
+      args:
+        DOCKER_IMAGE_PREFIX: ${DOCKER_IMAGE_PREFIX-}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
+        PYTORCH_CU118_INDEX_URL: ${PYTORCH_CU118_INDEX_URL:-https://mirror.sjtu.edu.cn/pytorch-wheels/cu118}
+        MMCV_WHEEL_INDEX_URL: ${MMCV_WHEEL_INDEX_URL:-https://download.openmmlab.com/mmcv/dist/cu118/torch2.0.0/index.html}
     deploy:
       resources:
         reservations:

@@ -51,7 +51,26 @@ docker compose -f compose.yaml -f compose.ai.yaml up -d --build
 
 AI 独立也可以连接远程模型。设置两个远程模型地址后，运行 `docker compose -f compose.ai.yaml up -d --build`。若只在本机部署其中一个模型，可显式指定要启动的 `worker tts` 或 `worker lipsync` 服务，并配置另一个服务的远程地址。各服务的 `readyz` 或健康接口反映模型实际就绪情况，容器首次加载时请等待就绪再开播。
 
+## Docker 镜像与 pip 源
+
+`.env.example` 默认使用下列配置，复制为 `.env` 后即可生效：
+
+```dotenv
+DOCKER_IMAGE_PREFIX=docker.1ms.run/
+PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+PYTORCH_CU121_INDEX_URL=https://mirror.sjtu.edu.cn/pytorch-wheels/cu121
+PYTORCH_CU118_INDEX_URL=https://mirror.sjtu.edu.cn/pytorch-wheels/cu118
+```
+
+`DOCKER_IMAGE_PREFIX` 是带末尾 `/` 的前缀，覆盖全部 Docker 基础镜像和 SRS。设为 `DOCKER_IMAGE_PREFIX=` 或删除该项，Compose 就使用 Docker Hub 官方镜像地址，不会回退到镜像站。也可以换成其他兼容 Docker Hub 的镜像前缀。
+
+普通 Python 包使用[清华 PyPI 镜像](https://mirrors.tuna.tsinghua.edu.cn/help/pypi/)，CUDA 版本的 PyTorch 使用[上海交大 PyTorch 镜像](https://mirror.sjtu.edu.cn/docs/pytorch-wheels)。两种 CUDA 索引分别匹配已锁定的依赖，不能改为普通 PyPI 地址。MMCV 保留匹配 CUDA 11.8 / torch 2.0 的专用 wheel 目录，也可通过 `MMCV_WHEEL_INDEX_URL` 修改。需要官方 pip 源时显式设置 `PIP_INDEX_URL=https://pypi.org/simple`，PyTorch 分别设置 `https://download.pytorch.org/whl/cu121` 和 `https://download.pytorch.org/whl/cu118`。修改这些构建参数后重新 `docker compose ... build`；已有镜像不受 `.env` 的事后修改影响。
+
 ## 模型和参考音频
+
+**已手动复制模型：直接跳过下面第 2 步的下载。** 在 `.env` 中设置 `COSYVOICE_WEIGHTS_DIR` 和 `MUSETALK_WEIGHTS_DIR` 指向完整权重目录即可；默认分别是 `./models/cosyvoice` 和 `./models/musetalk`。这些目录作为宿主机挂载使用，不进入 Docker 构建上下文，构建和启动均不下载权重，因此不需要 `SKIP_MODEL_DOWNLOAD` 开关。仍需准备第 3 步的音色参考数据，并使用 `--profile models` 启动本地模型服务。
+
+Dockerfile 中的 Git 克隆是固定版本的推理程序源码，pip 安装是运行依赖，二者都不是模型权重。复制了权重后，首次构建仍需完成这两项；已有构建好的镜像时可以通过 `docker compose ... up -d --no-build` 复用镜像。
 
 1. `deploy/tts.Dockerfile` 和 `deploy/lipsync.Dockerfile` 在构建时获取固定 Git 提交。CosyVoice 使用 Python 3.10 和 CUDA 12.1。MuseTalk 使用 Python 3.10 和 CUDA 11.8。镜像启动时只读取本地权重。
 2. 从 [CosyVoice3 官方仓库](https://huggingface.co/FunAudioLLM/Fun-CosyVoice3-0.5B-2512) 获取完整快照。选定实际提交并记录，使用 `hf download FunAudioLLM/Fun-CosyVoice3-0.5B-2512 --revision "$COSYVOICE_REVISION" --local-dir ./models/cosyvoice`。MuseTalk 根据 [固定提交的资源清单](https://github.com/TMElyralab/MuseTalk/blob/0a89dec45a0192b824e3cf4daf96c239440c5ed8/download_weights.sh) 准备完整权重树，补齐 [模型服务文档](docs/model-services.md) 列出的检测器等文件。记录实际权重版本、SHA256 和许可。下载由操作者显式完成。
