@@ -58,6 +58,7 @@ export default function App() {
   const running = active(session);
   // A read may finish after a command; only the current generation can update live state.
   const liveVersion = useRef(0);
+  const liveReads = useRef(0);
   // Count overlapping commands so polling and selection locks resume only after all settle.
   const pending = useRef(0);
   const sessionIdRef = useRef("");
@@ -78,11 +79,14 @@ export default function App() {
   }, []);
   const readLive = useCallback(async () => {
     const version = ++liveVersion.current;
+    liveReads.current++;
     try {
       const result = await api<{ session: Session | null }>("/live");
       if (version === liveVersion.current) acceptSession(result.session);
     } catch (e) {
       if (version === liveVersion.current) throw e;
+    } finally {
+      liveReads.current--;
     }
   }, [acceptSession]);
   const refresh = useCallback(async () => {
@@ -108,7 +112,8 @@ export default function App() {
     if (!connected) return;
     refresh().catch((e) => setError(e.message));
     const id = setInterval(() => {
-      if (!pending.current) readLive().catch((e) => setError(e.message));
+      if (!pending.current && !liveReads.current)
+        readLive().catch((e) => setError(e.message));
     }, 5000);
     return () => {
       liveVersion.current++;

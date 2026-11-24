@@ -469,3 +469,60 @@ it("clears collector and relay state when polling discovers a different session"
     screen.queryByRole("button", { name: "停止转推" }),
   ).not.toBeInTheDocument();
 });
+it("serializes slow background polls and accepts their results", async () => {
+  let tick!: () => void;
+  const realInterval = globalThis.setInterval;
+  vi.spyOn(globalThis, "setInterval").mockImplementation(((
+    fn: () => void,
+    ms: number,
+  ) => {
+    if (ms === 5000) {
+      tick = fn;
+      return 1;
+    }
+    return realInterval(fn, ms);
+  }) as any);
+  const original = globalThis.fetch;
+  const replies: Array<(value: any) => void> = [];
+  let gets = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((url: string, options: any = {}) => {
+      if (url === "/api/live" && options.method === "GET" && ++gets > 1)
+        return new Promise((resolve) => replies.push(resolve));
+      return original(url, options);
+    }),
+  );
+  render(<App />);
+  await screen.findByRole("option", { name: "小林" });
+  tick();
+  await waitFor(() => expect(replies).toHaveLength(1));
+  tick();
+  tick();
+  expect(gets).toBe(2);
+  replies[0]({
+    ok: true,
+    status: 200,
+    text: async () =>
+      JSON.stringify({
+        session: {
+          id: "slow-session",
+          avatarId: "a",
+          lookId: "la",
+          platform: "douyin",
+          status: "running",
+          hostEnabled: false,
+        },
+      }),
+  });
+  await screen.findByText("slow-session");
+  expect(screen.getByRole("button", { name: "结束直播" })).toBeEnabled();
+  tick();
+  await waitFor(() => expect(replies).toHaveLength(2));
+  replies[1]({
+    ok: true,
+    status: 200,
+    text: async () => JSON.stringify({ session: null }),
+  });
+  await screen.findByRole("button", { name: "开始直播" });
+});
