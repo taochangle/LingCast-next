@@ -189,14 +189,15 @@ func videoFormat(path string) (string, error) {
 	return "", errors.New("Unsupported container")
 }
 
-type cappedOutput struct{ bytes.Buffer }
+type cappedOutput struct{ buffer bytes.Buffer }
 
 func (b *cappedOutput) Write(p []byte) (int, error) {
-	if b.Len()+len(p) > 2<<20 {
+	if b.buffer.Len()+len(p) > 2<<20 {
 		return 0, errors.New("Probe metadata exceeds limit")
 	}
-	return b.Buffer.Write(p)
+	return b.buffer.Write(p)
 }
+func (b *cappedOutput) Bytes() []byte { return b.buffer.Bytes() }
 func boundedOutput(cmd *exec.Cmd) ([]byte, error) {
 	var out cappedOutput
 	cmd.Stdout = &out

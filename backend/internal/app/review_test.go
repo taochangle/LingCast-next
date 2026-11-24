@@ -258,3 +258,29 @@ func TestRestoreLiveSessionRepairsPreviewAndError(t *testing.T) {
 		t.Fatal(s)
 	}
 }
+
+func TestProbeOutputChild(t *testing.T) {
+	if os.Getenv("LINGCAST_PROBE_OUTPUT_CHILD") != "1" {
+		return
+	}
+	_, _ = os.Stdout.Write(bytes.Repeat([]byte("x"), 3<<20))
+	os.Exit(0)
+}
+func TestBoundedOutputRejectsOversizedChild(t *testing.T) {
+	cmd := exec.Command(os.Args[0], "-test.run=^TestProbeOutputChild$")
+	cmd.Env = append(os.Environ(), "LINGCAST_PROBE_OUTPUT_CHILD=1")
+	data, e := boundedOutput(cmd)
+	if e == nil {
+		t.Fatal("oversized child stdout was accepted", len(data))
+	}
+	out, ok := cmd.Stdout.(*cappedOutput)
+	if !ok {
+		t.Fatal("missing capped writer")
+	}
+	if out.buffer.Cap() > 2<<20 {
+		t.Fatal("retained buffer allocation exceeds cap", out.buffer.Cap())
+	}
+	if len(out.Bytes()) > 2<<20 {
+		t.Fatal("retained output exceeds cap", len(out.Bytes()))
+	}
+}
