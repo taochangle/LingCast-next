@@ -11,6 +11,8 @@ test('background authorizes the binding, forwards only new event fields, and rej
   const tabMessages = [];
   let messageListener;
   let serverStatus = 200;
+  let invalidAck = false;
+  let pageResponding = true;
   globalThis.chrome = {
     runtime: {
       id: 'abc',
@@ -30,6 +32,7 @@ test('background authorizes the binding, forwards only new event fields, and rej
       sendMessage: async (id, message) => {
         assert.equal(id, tabId);
         tabMessages.push(message);
+        if (!pageResponding) throw new Error('No running content script');
         return { ok: true };
       },
     },
@@ -40,7 +43,12 @@ test('background authorizes the binding, forwards only new event fields, and rej
   globalThis.fetch = async (endpoint, options) => {
     const body = JSON.parse(options.body);
     calls.push({ endpoint, body, headers: options.headers, credentials: options.credentials, redirect: options.redirect });
-    return new Response(JSON.stringify({ accepted: body.events.length, serverTime: '2026-11-24T12:00:00Z' }),
+    const retryIds = body.events.filter(event => event.id === 'retry').map(event => event.id);
+    const processedIds = body.events.filter(event => event.id !== 'retry').map(event => event.id);
+    if (invalidAck) processedIds.push('unknown');
+    return new Response(JSON.stringify({
+      accepted: processedIds.length, processedIds, retryIds, serverTime: '2026-11-24T12:00:00Z',
+    }),
       { status: serverStatus });
   };
   const popup = { id: 'abc', url: 'chrome-extension://abc/popup.html' };
@@ -68,19 +76,35 @@ test('background authorizes the binding, forwards only new event fields, and rej
     };
     assert.equal((await send({ ...payload, runId: 'stale' }, page)).stop, true);
     assert.equal(calls.length, 1);
-    assert.equal((await send(payload, page)).ok, true);
-    assert.deepEqual(calls[1].body.events, [{ id: 'sample', kind: 'comment', nickname: '<img>', text: 'hello' }]);
+    const retry = { id: 'retry', kind: 'like', nickname: 'spectator', text: '' };
+    const partial = await send({ ...payload, events: [...payload.events, retry] }, page);
+    assert.deepEqual(partial, { ok: true, processedIds: ['sample'] });
+    assert.deepEqual(calls[1].body.events, [{ id: 'sample', kind: 'comment', nickname: '<img>', text: 'hello' }, retry]);
     const status = await send({ type: 'LC_STATUS' });
     assert.equal(status.status.accepted, 1);
     assert.equal(JSON.stringify(status).includes(token), false);
+    invalidAck = true;
+    const invalid = await send({ ...payload, events: [retry] }, page);
+    assert.equal(invalid.ok, false);
+    assert.equal(invalid.processedIds, undefined);
     assert.equal((await send({ type: 'LC_STOP' })).ok, true);
     assert.equal((await send(payload, page)).stop, true);
-    assert.equal(calls.length, 2);
+    assert.equal(calls.length, 3);
     assert.equal(JSON.stringify(store).includes(token), false);
 
     serverStatus = 401;
     assert.equal((await send(config)).ok, false);
     assert.equal(tabMessages.filter(message => message.type === 'LC_BEGIN').length, 1);
+
+    serverStatus = 200;
+    invalidAck = false;
+    assert.equal((await send(config)).ok, true);
+    store.collector.lastContact = Date.now() - 45_000;
+    pageResponding = false;
+    const disconnected = await send({ type: 'LC_STATUS' });
+    assert.equal(disconnected.status.active, false);
+    assert.match(disconnected.status.message, /连接已断开/);
+    assert.equal(JSON.stringify(store).includes(token), false);
   } finally {
     globalThis.fetch = realFetch;
     delete globalThis.chrome;

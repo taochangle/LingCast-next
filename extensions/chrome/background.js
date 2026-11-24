@@ -1,6 +1,7 @@
 import { boundToRoom, normalizeEvents, roomURL, serverOrigin } from './protocol.js';
 
 const stateKey = 'collector';
+const staleContactMs = 40_000;
 let transitions = Promise.resolve();
 let upload;
 
@@ -43,19 +44,30 @@ async function request(config, events, signal = AbortSignal.timeout(8_000)) {
     error.status = response.status;
     throw error;
   }
-  const result = await response.json().catch(() => ({}));
-  if (!Number.isSafeInteger(result.accepted) || result.accepted < 0 || result.accepted > events.length) {
+  const result = await response.json().catch(() => null);
+  const { accepted, processedIds, retryIds } = result ?? {};
+  if (!Number.isSafeInteger(accepted) || accepted < 0 || !Array.isArray(processedIds) ||
+    !Array.isArray(retryIds) || accepted > processedIds.length ||
+    processedIds.length + retryIds.length !== events.length) {
     throw new Error('服务器响应与 LingCast 采集接口不符');
   }
-  return result.accepted;
+  const remaining = new Set(events.map(event => event.id));
+  for (const id of [...processedIds, ...retryIds]) {
+    if (!remaining.delete(id)) throw new Error('服务器返回的互动确认编号无效');
+  }
+  return { accepted, processedIds, retryIds };
+}
+
+function sendToCollector(current, type, extra = {}) {
+  const target = current.documentId ? { documentId: current.documentId } : { frameId: 0 };
+  return chrome.tabs.sendMessage(current.tabId, { type, runId: current.runId, ...extra }, target);
 }
 
 async function stop(current, message = '已停止采集') {
   await save({ message, accepted: current?.accepted ?? 0, discarded: current?.discarded ?? 0 });
   if (!current?.runId) return;
   if (upload?.runId === current.runId) upload.controller.abort();
-  const target = current.documentId ? { documentId: current.documentId } : { frameId: 0 };
-  chrome.tabs.sendMessage(current.tabId, { type: 'LC_STOP', runId: current.runId }, target).catch(() => {});
+  sendToCollector(current, 'LC_STOP').catch(() => {});
 }
 
 async function start(message) {
@@ -80,9 +92,8 @@ async function start(message) {
     const latestTab = await chrome.tabs.get(tabId);
     if (roomURL(latestTab.url, platform) !== room) throw new Error('直播页面已切换');
     config.documentId = injection.documentId;
-    const target = config.documentId ? { documentId: config.documentId } : { frameId: 0 };
-    await save({ ...config, accepted: 0, discarded: 0, message: '正在识别直播互动区域' });
-    const reply = await chrome.tabs.sendMessage(tabId, { type: 'LC_BEGIN', runId: config.runId, platform }, target);
+    await save({ ...config, accepted: 0, discarded: 0, message: '正在识别直播互动区域', lastContact: Date.now() });
+    const reply = await sendToCollector(config, 'LC_BEGIN', { platform });
     if (!reply?.ok) throw new Error('页面未响应');
   } catch {
     await stop(config, '无法读取当前直播页面，请重新打开直播间');
@@ -100,6 +111,11 @@ async function prepareUpload(message, sender) {
     return { reply: { ok: false, stop: true } };
   }
 
+  const now = Date.now();
+  if (now - current.lastContact >= 5_000) {
+    current.lastContact = now;
+    await save(current);
+  }
   const events = normalizeEvents(message.events);
   const statusMessage = message.ready ? '正在监听直播互动' : '等待直播互动区域加载';
   const discarded = Number.isSafeInteger(message.discarded) && message.discarded >= 0 ? message.discarded : 0;
@@ -107,7 +123,7 @@ async function prepareUpload(message, sender) {
     if (current.message !== statusMessage || current.discarded !== discarded) {
       await save({ ...current, discarded, message: statusMessage });
     }
-    return { reply: { ok: true } };
+    return { reply: { ok: true, processedIds: [] } };
   }
   if (upload?.runId === current.runId) return { reply: { ok: false } };
   const task = { runId: current.runId, controller: new AbortController() };
@@ -120,12 +136,13 @@ async function receiveEvents(message, sender) {
   if (reply) return reply;
   try {
     const signal = AbortSignal.any([task.controller.signal, AbortSignal.timeout(25_000)]);
-    const accepted = await request(current, events, signal);
+    const { accepted, processedIds, retryIds } = await request(current, events, signal);
     return await transition(async () => {
       const latest = await state();
       if (latest?.runId !== current.runId) return { ok: false, stop: true };
-      await save({ ...latest, accepted: latest.accepted + accepted, discarded, message: statusMessage });
-      return { ok: true };
+      const message = retryIds.length ? '正在重试待确认互动' : statusMessage;
+      await save({ ...latest, accepted: latest.accepted + accepted, discarded, message });
+      return { ok: true, processedIds };
     });
   } catch (error) {
     return await transition(async () => {
@@ -143,6 +160,26 @@ async function receiveEvents(message, sender) {
   }
 }
 
+async function collectorStatus() {
+  let current = await state();
+  if (current?.runId && Date.now() - current.lastContact >= staleContactMs) {
+    const reply = await sendToCollector(current, 'LC_PING').catch(() => null);
+    if (!reply?.ok) {
+      await stop(current, '直播页面连接已断开，请重新开始采集');
+      current = await state();
+    } else {
+      current.lastContact = Date.now();
+      await save(current);
+    }
+  }
+  return { ok: true, status: {
+    active: Boolean(current?.runId),
+    accepted: current?.accepted ?? 0,
+    discarded: current?.discarded ?? 0,
+    message: current?.message ?? '采集未启动',
+  } };
+}
+
 async function handle(message, sender) {
   if (sender.id !== chrome.runtime.id || !message) return { ok: false };
   if (message.type === 'LC_EVENTS') return receiveEvents(message, sender);
@@ -154,15 +191,7 @@ async function handle(message, sender) {
       return { ok: true };
     });
   }
-  if (message.type === 'LC_STATUS') {
-    const current = await state();
-    return { ok: true, status: {
-      active: Boolean(current?.runId),
-      accepted: current?.accepted ?? 0,
-      discarded: current?.discarded ?? 0,
-      message: current?.message ?? '采集未启动',
-    } };
-  }
+  if (message.type === 'LC_STATUS') return transition(collectorStatus);
   return { ok: false };
 }
 

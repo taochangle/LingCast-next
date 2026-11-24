@@ -31,7 +31,7 @@
 
   const douyin = {
     root: '#chatroom .webcast-chatroom',
-    selector: '#chatroom .webcast-chatroom .webcast-chatroom___item',
+    selector: '.webcast-chatroom___item',
     parse(row) {
       const author = row.querySelector('.webcast-chatroom___nickname');
       const label = visibleText(author).trim();
@@ -59,7 +59,7 @@
   };
 
   const xiaohongshu = {
-    root: '#live-layout, body:not(:has(#live-layout)):has(.msg-wrapper, .enter-msgs)',
+    root: '#live-layout',
     selector: '.msg-wrapper, .enter-msgs .msg-content',
     parse(row) {
       if (row.matches('.enter-msgs .msg-content') && row.closest('.msg-wrapper')) return null;

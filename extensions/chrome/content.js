@@ -29,7 +29,7 @@
         if (seenIds.size > dedupLimit) seenIds.delete(seenIds.values().next().value);
       }
       const wasBaseline = baselineRows.delete(row);
-      if (baseline || (!previous && wasBaseline)) return;
+      if (baseline || (!previous && wasBaseline) || (previous?.signature === signature && !previous.domId)) return;
       entries.push({ event: { ...event, id: crypto.randomUUID() }, observedAt: Date.now() });
       if (entries.length > queueLimit) {
         entries.shift();
@@ -61,7 +61,7 @@
   function stop() {
     if (!active) return;
     active.observer.disconnect();
-    clearTimeout(active.scanTimer);
+    active.rootObserver.disconnect();
     clearInterval(active.uploadTimer);
     active = null;
   }
@@ -71,46 +71,53 @@
     if (!adapter) return false;
     stop();
     const queue = createQueue(adapter);
-    const pendingRows = new Set();
     const run = { runId, platform, uploading: false };
-    let root = document.querySelector(adapter.root);
+    let root;
     let pendingBatch;
     let expiredInFlight = 0;
-    if (root) queue.baseline(document);
 
-    function collect(element) {
-      if (!element || pendingRows.size >= dedupLimit) return;
-      const row = element.closest(adapter.selector);
-      if (row) pendingRows.add(row);
-      for (const descendant of element.querySelectorAll(adapter.selector)) {
-        if (pendingRows.size >= dedupLimit) break;
-        pendingRows.add(descendant);
+    run.rootObserver = new MutationObserver(records => {
+      const rows = new Set();
+      function include(row) {
+        if (row && rows.size < dedupLimit) rows.add(row);
       }
-    }
-
-    run.observer = new MutationObserver(records => {
-      const nextRoot = document.querySelector(adapter.root);
-      if (root !== nextRoot) {
-        root = nextRoot;
-        pendingRows.clear();
-        if (root) queue.baseline(document);
-        return;
-      }
-      if (!root) return;
       for (const record of records) {
         const target = record.target.nodeType === 1 ? record.target : record.target.parentElement;
-        const currentRow = target?.closest(adapter.selector);
-        if (currentRow && pendingRows.size < dedupLimit) pendingRows.add(currentRow);
-        for (const node of record.addedNodes) if (node.nodeType === 1) collect(node);
+        const owner = target?.closest(adapter.selector);
+        if (owner && root.contains(owner)) include(owner);
+        for (const node of record.addedNodes) {
+          if (node.nodeType !== 1 || (node.isConnected && !root.contains(node))) continue;
+          // A row added inside the room can already be detached by the next DOM commit.
+          if (node.matches(adapter.selector)) include(node);
+          for (const row of node.querySelectorAll(adapter.selector)) {
+            if (rows.size >= dedupLimit) break;
+            include(row);
+          }
+        }
       }
-      if (run.scanTimer || !pendingRows.size) return;
-      run.scanTimer = setTimeout(() => {
-        run.scanTimer = null;
-        for (const row of pendingRows) if (row.isConnected) queue.inspect(row);
-        pendingRows.clear();
-      }, 150);
+      for (const row of rows) queue.inspect(row);
     });
-    run.observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+
+    function updateRoot() {
+      const next = document.querySelector(adapter.root);
+      if (root === next) return;
+      run.rootObserver.disconnect();
+      root = next;
+      if (!root) return;
+      queue.baseline(root);
+      run.rootObserver.observe(root, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+        attributes: true,
+        attributeFilter: ['class', 'data-message-id', 'data-e2e', 'hidden', 'aria-hidden', 'style'],
+      });
+    }
+    updateRoot();
+    run.observer = new MutationObserver(updateRoot);
+    run.observer.observe(document.documentElement, {
+      childList: true, subtree: true, attributes: true, attributeFilter: ['id', 'class'],
+    });
 
     run.uploadTimer = setInterval(async () => {
       if (run.uploading) return;
@@ -127,10 +134,18 @@
           ready: Boolean(root), discarded: queue.dropped + expiredInFlight,
         });
         if (active !== run) return;
-        if (result?.stop) stop();
-        if (result?.ok) pendingBatch = null;
+        if (result?.stop) {
+          stop();
+          return;
+        }
+        if (result?.ok && Array.isArray(result.processedIds)) {
+          const processed = new Set(result.processedIds);
+          pendingBatch.events = pendingBatch.events.filter(event => !processed.has(event.id));
+          if (!pendingBatch.events.length) pendingBatch = null;
+        }
       } catch {
-        if (active === run) stop();
+        // The service worker or message channel can restart. Keep the same IDs until it returns.
+        if (active === run && !chrome.runtime.id) stop();
       } finally {
         run.uploading = false;
       }
@@ -142,6 +157,7 @@
   chrome.runtime.onMessage.addListener((message, sender, respond) => {
     if (sender.id !== chrome.runtime.id || sender.tab) return;
     if (message.type === 'LC_BEGIN') respond({ ok: start(message.runId, message.platform) });
+    if (message.type === 'LC_PING') respond({ ok: active?.runId === message.runId });
     if (message.type === 'LC_STOP' && active?.runId === message.runId) {
       stop();
       respond({ ok: true });

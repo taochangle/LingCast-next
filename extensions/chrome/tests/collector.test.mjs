@@ -146,7 +146,10 @@ test('observer suppresses the first mounted history and stops reading after expl
     chrome: { runtime: {
       id: 'abc',
       onMessage: { addListener: handler => { listener = handler; } },
-      sendMessage: async message => { messages.push(message); return { ok: true }; },
+      sendMessage: async message => {
+        messages.push(message);
+        return { ok: true, processedIds: message.events.map(event => event.id) };
+      },
     } },
   });
   for (const name of ['adapters.js', 'content.js']) {
@@ -176,4 +179,77 @@ test('observer suppresses the first mounted history and stops reading after expl
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(timers.size, 0);
   assert.equal(upload, null);
+});
+
+test('only reads the known XHS region, captures fast removal and attribute changes, and retries unresolved IDs', async () => {
+  const { document, MutationObserver } = parseHTML('<html><body><section id="live-layout"></section></body></html>');
+  const messages = [];
+  let listener;
+  let upload;
+  let response;
+  const context = createContext({
+    document, MutationObserver, crypto, location: { href: 'https://www.xiaohongshu.com/livestream/1' },
+    setInterval: callback => { upload = callback; return 1; },
+    clearInterval: () => { upload = null; },
+    setTimeout: callback => { setImmediate(callback); return 1; },
+    clearTimeout: () => {},
+    chrome: { runtime: {
+      id: 'abc',
+      onMessage: { addListener: handler => { listener = handler; } },
+      sendMessage: async message => { messages.push(message); return response(message.events); },
+    } },
+  });
+  for (const name of ['adapters.js', 'content.js']) {
+    runInContext(readFileSync(new URL(`../${name}`, import.meta.url), 'utf8'), context);
+  }
+  listener({ type: 'LC_BEGIN', runId: 'active', platform: 'xiaohongshu' }, { id: 'abc' }, () => {});
+  function row(text) {
+    const element = document.createElement('div');
+    element.innerHTML = '<span class="nickname">reader</span><span class="content"></span>';
+    element.lastElementChild.textContent = text;
+    return element;
+  }
+  const root = document.querySelector('#live-layout');
+  const outsider = row('outside');
+  outsider.className = 'msg-wrapper role-user';
+  document.body.append(outsider);
+
+  const quick = row('first');
+  quick.className = 'msg-wrapper role-user';
+  root.append(quick);
+  quick.remove();
+
+  const late = row('second');
+  root.append(late);
+  const settle = () => new Promise(resolve => setImmediate(resolve));
+  await settle();
+  late.className = 'msg-wrapper role-user';
+  await settle();
+  late.dataset.messageId = 'recognized-on-attribute';
+  await settle();
+  root.append(late.cloneNode(true));
+  await settle();
+
+  response = () => { throw new Error('Temporary runtime channel closure'); };
+  await upload();
+  assert.deepEqual([...messages[0].events.map(event => event.text)], ['first', 'second']);
+  const [first, second] = messages[0].events;
+  response = () => ({ ok: true, processedIds: [first.id] });
+  await upload();
+  assert.deepEqual([...messages[1].events.map(event => event.id)], [first.id, second.id]);
+  response = () => ({ ok: true, processedIds: [second.id] });
+  await upload();
+  assert.deepEqual([...messages[2].events.map(event => event.id)], [second.id]);
+  await upload();
+  assert.deepEqual(data(messages[3].events), []);
+  response = () => ({ ok: false, stop: true });
+  await upload();
+  assert.equal(upload, null);
+
+  root.remove();
+  listener({ type: 'LC_BEGIN', runId: 'next', platform: 'xiaohongshu' }, { id: 'abc' }, () => {});
+  response = () => ({ ok: true, processedIds: [] });
+  await upload();
+  assert.equal(messages.at(-1).ready, false);
+  assert.deepEqual(data(messages.at(-1).events), []);
 });
