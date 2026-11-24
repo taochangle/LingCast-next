@@ -101,6 +101,9 @@ class SessionManager:
                     raise ValueError("start cancelled")
                 self.output = self.output_factory(payload["sessionId"], paths)
                 output = self.output
+                output.cancel_inference = getattr(
+                    self.models, "cancel_render", lambda: None
+                )
             output.start()
             with self.lock:
                 if self.cancel.is_set():
@@ -110,6 +113,9 @@ class SessionManager:
                     status="live",
                     previewUrl="/preview/" + payload["sessionId"] + ".flv",
                 )
+                # Publish the live generation and leave preparation atomically.
+                # A stop observing live must take the full retirement/cleanup path.
+                self.preparing = False
                 if self.background:
                     self.thread = threading.Thread(
                         target=self._run,
@@ -125,17 +131,23 @@ class SessionManager:
                 self.last_stopped = payload["sessionId"]
                 if not cancelled:
                     self.current = None
-            raise
-        finally:
-            with self.lock:
                 self.preparing = False
+            raise
 
     def _run(self, output, cancel, sid):
         try:
             output.run(cancel, lambda: self.process_next(cancel))
         except Exception as error:
-            if not cancel.is_set():
-                self.fail(error, sid)
+            with self.lock:
+                # Output failures also cancel inference before joining it. The
+                # stopped state, rather than cancellation alone, identifies an
+                # intentional stop and preserves the original writer exception.
+                if (
+                    self.current
+                    and self.current["sessionId"] == sid
+                    and self.current["status"] != "stopped"
+                ):
+                    self.fail(error, sid)
 
     def process_next(self, expected=None):
         with self.lock:

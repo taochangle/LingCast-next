@@ -42,6 +42,7 @@ class LiveOutput:
         self.packets = queue.Queue(maxsize=50)
         self.writer = None
         self.failure = None
+        self.cancel_inference = lambda: None
         self.lifecycle = threading.RLock()
         self.children = []
         self.rtmp = os.environ.get(
@@ -279,7 +280,12 @@ class LiveOutput:
                     deadline = time.monotonic()
             if self.failure:
                 raise self.failure
+        except Exception as error:
+            self.failure = error
+            raise
         finally:
+            cancel.set()
+            self.cancel_inference()
             if capture is not None:
                 capture.release()
             self.stop()
