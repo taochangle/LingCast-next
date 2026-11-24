@@ -35,6 +35,7 @@ class LiveOutput:
         self.paths = paths
         self.proc = None
         self.relay_proc = None
+        self.relay_requested = False
         self.audio = None
         self.video = None
         self.capture = None
@@ -292,10 +293,17 @@ class LiveOutput:
             # Keep the session generation retiring until inference really exits.
             renderer.join()
 
+    def relay_state(self):
+        with self.lifecycle:
+            if self.relay_proc is None:
+                return "failed" if self.relay_requested else "disabled"
+            return "running" if self.relay_proc.poll() is None else "failed"
+
     def relay(self, data):
         with self.lifecycle:
             terminate(self.relay_proc)
             self.relay_proc = None
+            self.relay_requested = False
             if not data.get("enabled"):
                 return
             server = data.get("server", "")
@@ -308,6 +316,7 @@ class LiveOutput:
                 raise ValueError("invalid relay destination")
             if not self.alive():
                 raise RuntimeError("output unavailable")
+            self.relay_requested = True
             self.relay_proc = subprocess.Popen(
                 [
                     "ffmpeg",
@@ -331,6 +340,7 @@ class LiveOutput:
         self.closed.set()
         with self.lifecycle:
             children, self.children = self.children, []
+            self.relay_requested = False
             relay, self.relay_proc = self.relay_proc, None
             process, self.proc = self.proc, None
             audio, self.audio = self.audio, None

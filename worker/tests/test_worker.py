@@ -41,6 +41,9 @@ class Output:
     def run(self, *a):
         pass
 
+    def relay_state(self):
+        return "disabled"
+
     def relay(self, *a):
         self.relays.append(a)
 
@@ -96,6 +99,37 @@ class WorkerTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 operation()
         self.assertEqual(self.manager.status()["sessionId"], "s2")
+
+    def test_long_host_yields_after_drain_then_resumes_exact_text(self):
+        import time
+
+        self.manager.start(self.payload)
+        now = time.time()
+        task = dict(
+            id="h",
+            kind="host",
+            text="甲" * 240 + " 乙",
+            createdAt=now,
+            expiresAt=now + 60,
+        )
+        manual = dict(task, id="m", kind="manual", text="插播")
+        spoken = []
+
+        def render(look, voice, text, sha):
+            spoken.append(text)
+            if len(spoken) == 1:
+                self.manager.enqueue("s1", manual)
+            return []
+
+        self.models.render = render
+        drained = []
+        self.outputs[0].drain = lambda cancel: drained.append(spoken[-1])
+        self.manager.enqueue("s1", task)
+        while self.manager.process_next():
+            pass
+        self.assertEqual(spoken, ["甲" * 240, "插播", " 乙"])
+        self.assertEqual(drained, spoken)
+        self.assertFalse(self.manager.enqueue("s1", task))
 
     def test_preparation_and_no_auto_relay(self):
         self.manager.start(self.payload)

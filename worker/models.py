@@ -100,6 +100,16 @@ def paired_packets(lines):
         raise ValueError("incomplete rendered stream")
 
 
+def split_segment(remaining):
+    cut = min(240, len(remaining))
+    if len(remaining) > cut:
+        for position in range(cut, 119, -1):
+            if remaining[position - 1] in "。！？；.!?;\n":
+                cut = position
+                break
+    return remaining[:cut], remaining[cut:]
+
+
 class ModelClient:
     def __init__(self, render_url, render_token, tts_url, tts_token):
         if not render_token or not tts_token:
@@ -173,13 +183,7 @@ class ModelClient:
         while remaining:
             if cancel is not None and cancel.is_set():
                 return
-            cut = min(240, len(remaining))
-            if len(remaining) > cut:
-                for position in range(cut, 119, -1):
-                    if remaining[position - 1] in "。！？；.!?;\n":
-                        cut = position
-                        break
-            chunk, remaining = remaining[:cut], remaining[cut:]
+            chunk, remaining = split_segment(remaining)
             yield from self._render_chunk(look, voice, chunk, sha, cancel)
 
     def _render_chunk(self, look, voice, text, sha, cancel=None):

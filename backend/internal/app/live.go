@@ -23,7 +23,23 @@ func safeSession(s object) object {
 }
 func (a *App) live(w http.ResponseWriter, r *http.Request, p []string) {
 	if len(p) == 2 && r.Method == "GET" {
-		write(w, 200, object{"session": safeSession(a.current()), "lastSession": safeSession(a.lastSession())})
+		session := safeSession(a.current())
+		if session != nil && session["status"] == "live" {
+			var state struct {
+				SessionID  string
+				RelayState string
+			}
+			session["relayState"] = "unknown"
+			ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+			defer cancel()
+			if a.worker(ctx, "GET", "/status", nil, &state) == nil && state.SessionID == session["id"] {
+				switch state.RelayState {
+				case "disabled", "running", "failed":
+					session["relayState"] = state.RelayState
+				}
+			}
+		}
+		write(w, 200, object{"session": session, "lastSession": safeSession(a.lastSession())})
 		return
 	}
 	if len(p) == 2 && r.Method == "POST" {

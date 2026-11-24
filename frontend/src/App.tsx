@@ -53,7 +53,6 @@ export default function App() {
   const [speech, setSpeech] = useState("");
   const [relayServer, setRelayServer] = useState("");
   const [relayKey, setRelayKey] = useState("");
-  const [relayEnabled, setRelayOn] = useState(false);
   const [settings, setSettings] = useState<Settings | null>(null);
   const running = active(session);
   // A read may finish after a command; only the current generation can update live state.
@@ -63,14 +62,16 @@ export default function App() {
   const pending = useRef(0);
   const sessionIdRef = useRef("");
   const [collectorSession, setCollectorSession] = useState("");
-  const [relaySession, setRelaySession] = useState("");
-  const relayOn = relayEnabled && relaySession === session?.id;
+  const relayState = session?.relayState || "disabled";
+  const relayOn = relayState === "running" || relayState === "launching";
+  const relayDescription = {
+    disabled: "转推已关闭", launching: "正在启动转推", running: "转推进程运行中",
+    failed: "转推进程已退出", unknown: "转推状态暂时未知",
+  }[relayState];
   const acceptSession = useCallback((next: Session | null) => {
     if (sessionIdRef.current !== (next?.id || "") || !active(next)) {
       setCollector("");
       setCollectorSession("");
-      setRelayOn(false);
-      setRelaySession("");
       setRelayKey("");
       setRelayServer("");
     }
@@ -351,7 +352,6 @@ export default function App() {
                       act(async () => {
                         await api(`/live/${session!.id}/stop`, "POST");
                         setCollector("");
-                        setRelayOn(false);
                         await refresh();
                       })
                     }
@@ -376,7 +376,6 @@ export default function App() {
                         acceptSession(r.session);
                         setCollector(r.collectorToken);
                         setCollectorSession(r.session.id);
-                        setRelayOn(false);
                       })
                     }
                   >
@@ -494,6 +493,7 @@ export default function App() {
             </div>
             <section className="panel relay">
               <h2>平台转推</h2>
+              <p role="status">{relayDescription}</p>
               <p className="hint">
                 选择平台不会开启外部推流。请填写平台提供的地址与密钥，再显式启用。
               </p>
@@ -528,9 +528,7 @@ export default function App() {
                         streamKey: relayKey,
                       });
                       if (sessionIdRef.current !== session!.id) return;
-                      setRelaySession(session!.id);
-                      setRelayOn(!relayOn);
-                      setNotice(relayOn ? "已停止外部转推" : "已启用外部转推");
+                      setSession({ ...session!, relayState: relayOn ? "disabled" : "launching" });
                     })
                   }
                 >
@@ -545,8 +543,8 @@ export default function App() {
                         server: "",
                         streamKey: "",
                       });
-                      setRelayOn(false);
-                      setNotice("已发送停止转推命令");
+                      if (sessionIdRef.current === session!.id)
+                        setSession({ ...session!, relayState: "disabled" });
                     })
                   }
                 >

@@ -4,6 +4,8 @@ import heapq
 import time
 from datetime import datetime
 
+from worker.models import split_segment
+
 PRIORITY = {
     kind: i
     for i, kind in enumerate(("manual", "gift", "like", "comment", "welcome", "host"))
@@ -58,6 +60,19 @@ class Scheduler:
     def pop(self):
         self._purge()
         return heapq.heappop(self.items)[2] if self.items else None
+
+    def pop_segment(self):
+        self._purge()
+        if not self.items:
+            return None
+        priority, sequence, task = heapq.heappop(self.items)
+        segment, remainder = split_segment(task["text"])
+        if remainder:
+            # Reserve the original queue slot and FIFO order. Expiry governs
+            # admission to speech; an already-started script must finish intact.
+            continuation = dict(task, text=remainder, _expires=float("inf"))
+            heapq.heappush(self.items, (priority, sequence, continuation))
+        return dict(task, text=segment, _final=not remainder)
 
     def __len__(self):
         self._purge()

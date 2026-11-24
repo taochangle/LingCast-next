@@ -526,3 +526,19 @@ it("serializes slow background polls and accepts their results", async () => {
   });
   await screen.findByRole("button", { name: "开始直播" });
 });
+
+it("shows relay failure and explicit disable after refreshing a live session", async () => {
+  const original = globalThis.fetch;
+  vi.stubGlobal("fetch", vi.fn((url: string, options: any = {}) => {
+    if (url === "/api/live" && options.method === "GET")
+      return Promise.resolve({ok: true, status: 200, text: async () => JSON.stringify({
+        session: {id: "s", status: "live", avatarId: "a", lookId: "la", platform: "douyin", relayState: "failed"}
+      })});
+    return original(url, options);
+  }));
+  render(<App />);
+  await screen.findByText("转推进程已退出");
+  expect(screen.getByRole("button", {name: "结束直播"})).toBeEnabled();
+  fireEvent.click(screen.getByRole("button", {name: "确保停止转推"}));
+  await waitFor(() => expect(calls.some(c => c.url.endsWith("/relay") && c.body.enabled === false)).toBe(true));
+});

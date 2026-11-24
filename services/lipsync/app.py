@@ -17,6 +17,14 @@ from services.common import SAFE, Manifest, make_handler, text_request
 from worker.models import OPENER, bounded_lines
 
 
+def file_sha256(path):
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        while chunk := source.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 class MuseEngine:
     def __init__(self):
         self.ready = False
@@ -36,11 +44,6 @@ class MuseEngine:
             from services.lipsync.runtime import StreamingMuse
 
             self.model = StreamingMuse()
-            for look, value in self.manifest.read().get("looks", {}).items():
-                path = self.manifest.resolve(value["basePath"])
-                if hashlib.sha256(path.read_bytes()).hexdigest() != value["sha256"]:
-                    raise ValueError("prepared material modified")
-                self.model.prepare(look + "_" + value["sha256"], path, value["sha256"])
             self.ready = True
         except Exception as error:
             self.failure = type(error).__name__
@@ -57,6 +60,12 @@ class MuseEngine:
             raise ValueError("invalid material checksum/identity")
         old = self.manifest.read().get("looks", {}).get(look)
         path = self.manifest.resolve("looks/" + look + "_" + sha + ".mp4")
+        relative = str(path.relative_to(self.manifest.root))
+        if path.is_file() and file_sha256(path) == sha:
+            self.model.prepare(look + "_" + sha, path, sha)
+            if old != dict(basePath=relative, sha256=sha):
+                self.manifest.bind(look, relative, sha)
+            return dict(ready=True, lookId=look, sha256=sha)
         path.parent.mkdir(parents=True, exist_ok=True)
         pending = path.with_suffix(".tmp")
         pending.write_bytes(body)
@@ -137,18 +146,20 @@ class MuseEngine:
             raise ValueError("incomplete CosyVoice stream")
 
     def events(self, data):
+        text, voice = text_request(data)
+        look = data["lookId"]
+        sha = data["sha256"]
+        binding = self.manifest.look(look, sha)
+        if file_sha256(self.manifest.resolve(binding["basePath"])) != sha:
+            raise ValueError("prepared material modified")
+        profile = look + "_" + sha
+        if profile not in self.model.avatars:
+            raise ValueError("look not prepared")
         import cv2
         import numpy as np
         import soundfile as sf
         from scipy.signal import resample_poly
 
-        text, voice = text_request(data)
-        look = data["lookId"]
-        sha = data["sha256"]
-        self.manifest.look(look, sha)
-        profile = look + "_" + sha
-        if profile not in self.model.avatars:
-            raise ValueError("look not prepared")
         offset = 0
         with tempfile.TemporaryDirectory(
             dir=os.environ.get("MUSETALK_CACHE", "/cache/musetalk")

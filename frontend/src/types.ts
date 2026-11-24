@@ -31,6 +31,7 @@ export interface Session {
   platform: Platform;
   status: string;
   hostEnabled: boolean;
+  relayState?: "disabled" | "launching" | "running" | "failed" | "unknown";
   previewUrl: string;
   error: string;
   createdAt: string;

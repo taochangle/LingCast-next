@@ -96,7 +96,7 @@ func newFixture(t *testing.T) *fixture {
 			if s != nil {
 				sid = str(s, "id")
 			}
-			write(w, 200, object{"sessionId": sid, "status": "live", "speaking": false, "queueDepth": 0})
+			write(w, 200, object{"sessionId": sid, "status": "live", "relayState": "failed", "streamKey": "private", "speaking": false, "queueDepth": 0})
 		default:
 			write(w, 200, object{})
 		}
@@ -342,3 +342,18 @@ func TestOversizedImageRejected(t *testing.T) {
 type zeroReader struct{}
 
 func (zeroReader) Read(p []byte) (int, error) { clear(p); return len(p), nil }
+
+func TestLiveRefreshReportsSanitizedRelayFailure(t *testing.T) {
+	f := newFixture(t)
+	if w := f.start(); w.Code != 201 {
+		t.Fatal(w.Body.String())
+	}
+	w := f.req("GET", "/api/live", "", "a")
+	var response struct{ Session object }
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Session["status"] != "live" || response.Session["relayState"] != "failed" || strings.Contains(w.Body.String(), "private") {
+		t.Fatal(w.Body.String())
+	}
+}

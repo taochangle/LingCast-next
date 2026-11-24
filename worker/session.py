@@ -157,7 +157,7 @@ class SessionManager:
                 expected is not None and expected is not self.cancel
             ) or self.cancel.is_set():
                 return False
-            task = self.queue.pop()
+            task = self.queue.pop_segment()
             if task is None:
                 return False
             self.speaking = True
@@ -179,7 +179,7 @@ class SessionManager:
             if hasattr(output, "drain"):
                 output.drain(cancel)
             with self.lock:
-                if cancel is self.cancel:
+                if cancel is self.cancel and task["_final"]:
                     self.last_completed = time.time()
             return True
         except Exception as error:
@@ -266,6 +266,7 @@ class SessionManager:
                     error=None,
                     queueDepth=0,
                     speaking=False,
+                    relayState="disabled",
                     preparing=self.preparing
                     or (self.retiring is not None and self.retiring.is_alive()),
                 )
@@ -282,6 +283,7 @@ class SessionManager:
                 error=self.current.get("error"),
                 queueDepth=len(self.queue),
                 speaking=self.speaking,
+                relayState=self.output.relay_state() if self.output else "disabled",
                 lastTaskCompletedAt=self.last_completed,
                 preparing=self.preparing
                 or (self.retiring is not None and self.retiring.is_alive()),

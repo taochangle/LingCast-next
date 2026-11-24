@@ -85,10 +85,14 @@ class StreamingMuse:
             import shutil
 
             shutil.rmtree(profile)
+        if prepared and name in self.avatars:
+            return
+        self.avatars.clear()
         avatar = m.Avatar(name, str(path), 0, 8, not prepared)
         if not avatar.input_latent_list_cycle:
             raise ValueError("no face prepared")
-        marker.write_text(sha)
+        if not prepared:
+            marker.write_text(sha)
         self.avatars[name] = avatar
 
     def render(self, name, audio, callback, frame_offset=0):
@@ -134,6 +138,10 @@ class StreamingMuse:
                 errors.append(error)
 
         avatar.process_frames = types.MethodType(consume, avatar)
-        avatar.inference(str(audio), None, 25, True)
+        try:
+            avatar.inference(str(audio), None, 25, True)
+        finally:
+            # The bound callback otherwise keeps this copy and its frame lists alive.
+            del avatar.process_frames
         if errors:
             raise RuntimeError("MuseTalk frame consumer failed") from errors[0]
