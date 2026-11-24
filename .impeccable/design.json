@@ -1,0 +1,479 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-24T09:11:05.764842+00:00",
+  "title": "Design System: LingCast",
+  "extensions": {
+    "colorMeta": {
+      "cobalt": {
+        "role": "primary",
+        "displayName": "cobalt",
+        "canonical": "#2449cf",
+        "tonalRamp": [
+          "oklch(15% 0.0525 266.03)",
+          "oklch(27% 0.1051 266.03)",
+          "oklch(39% 0.1681 266.03)",
+          "oklch(51% 0.2101 266.03)",
+          "oklch(63% 0.2101 266.03)",
+          "oklch(75% 0.1681 266.03)",
+          "oklch(87% 0.0946 266.03)",
+          "oklch(95% 0.0315 266.03)"
+        ]
+      },
+      "cobalt-hover": {
+        "role": "primary",
+        "displayName": "cobalt-hover",
+        "canonical": "#1c3bb4",
+        "tonalRamp": [
+          "oklch(15% 0.0484 266.17)",
+          "oklch(27% 0.0968 266.17)",
+          "oklch(39% 0.1549 266.17)",
+          "oklch(51% 0.1936 266.17)",
+          "oklch(63% 0.1936 266.17)",
+          "oklch(75% 0.1549 266.17)",
+          "oklch(87% 0.0871 266.17)",
+          "oklch(95% 0.0290 266.17)"
+        ]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "ink",
+        "canonical": "#17213a",
+        "tonalRamp": [
+          "oklch(15% 0.0124 266.40)",
+          "oklch(27% 0.0248 266.40)",
+          "oklch(39% 0.0397 266.40)",
+          "oklch(51% 0.0497 266.40)",
+          "oklch(63% 0.0497 266.40)",
+          "oklch(75% 0.0397 266.40)",
+          "oklch(87% 0.0224 266.40)",
+          "oklch(95% 0.0075 266.40)"
+        ]
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "muted",
+        "canonical": "#646e81",
+        "tonalRamp": [
+          "oklch(15% 0.0081 263.28)",
+          "oklch(27% 0.0161 263.28)",
+          "oklch(39% 0.0258 263.28)",
+          "oklch(51% 0.0322 263.28)",
+          "oklch(63% 0.0322 263.28)",
+          "oklch(75% 0.0258 263.28)",
+          "oklch(87% 0.0145 263.28)",
+          "oklch(95% 0.0048 263.28)"
+        ]
+      },
+      "line": {
+        "role": "neutral",
+        "displayName": "line",
+        "canonical": "#e4e8ef",
+        "tonalRamp": [
+          "oklch(15% 0.0026 261.79)",
+          "oklch(27% 0.0052 261.79)",
+          "oklch(39% 0.0083 261.79)",
+          "oklch(51% 0.0104 261.79)",
+          "oklch(63% 0.0104 261.79)",
+          "oklch(75% 0.0083 261.79)",
+          "oklch(87% 0.0047 261.79)",
+          "oklch(95% 0.0016 261.79)"
+        ]
+      },
+      "ground": {
+        "role": "neutral",
+        "displayName": "ground",
+        "canonical": "#f7f8fb",
+        "tonalRamp": [
+          "oklch(15% 0.0010 271.37)",
+          "oklch(27% 0.0021 271.37)",
+          "oklch(39% 0.0033 271.37)",
+          "oklch(51% 0.0041 271.37)",
+          "oklch(63% 0.0041 271.37)",
+          "oklch(75% 0.0033 271.37)",
+          "oklch(87% 0.0019 271.37)",
+          "oklch(95% 0.0006 271.37)"
+        ]
+      },
+      "white": {
+        "role": "neutral",
+        "displayName": "white",
+        "canonical": "#ffffff",
+        "tonalRamp": [
+          "oklch(15% 0.0000 89.88)",
+          "oklch(27% 0.0000 89.88)",
+          "oklch(39% 0.0000 89.88)",
+          "oklch(51% 0.0000 89.88)",
+          "oklch(63% 0.0000 89.88)",
+          "oklch(75% 0.0000 89.88)",
+          "oklch(87% 0.0000 89.88)",
+          "oklch(95% 0.0000 89.88)"
+        ]
+      },
+      "selected": {
+        "role": "primary",
+        "displayName": "selected",
+        "canonical": "#ebf0ff",
+        "tonalRamp": [
+          "oklch(15% 0.0052 271.20)",
+          "oklch(27% 0.0104 271.20)",
+          "oklch(39% 0.0167 271.20)",
+          "oklch(51% 0.0209 271.20)",
+          "oklch(63% 0.0209 271.20)",
+          "oklch(75% 0.0167 271.20)",
+          "oklch(87% 0.0094 271.20)",
+          "oklch(95% 0.0031 271.20)"
+        ]
+      },
+      "control-line": {
+        "role": "neutral",
+        "displayName": "control-line",
+        "canonical": "#dce1ea",
+        "tonalRamp": [
+          "oklch(15% 0.0033 262.38)",
+          "oklch(27% 0.0067 262.38)",
+          "oklch(39% 0.0107 262.38)",
+          "oklch(51% 0.0134 262.38)",
+          "oklch(63% 0.0134 262.38)",
+          "oklch(75% 0.0107 262.38)",
+          "oklch(87% 0.0060 262.38)",
+          "oklch(95% 0.0020 262.38)"
+        ]
+      },
+      "field-line": {
+        "role": "neutral",
+        "displayName": "field-line",
+        "canonical": "#d9dfe9",
+        "tonalRamp": [
+          "oklch(15% 0.0038 260.73)",
+          "oklch(27% 0.0076 260.73)",
+          "oklch(39% 0.0121 260.73)",
+          "oklch(51% 0.0151 260.73)",
+          "oklch(63% 0.0151 260.73)",
+          "oklch(75% 0.0121 260.73)",
+          "oklch(87% 0.0068 260.73)",
+          "oklch(95% 0.0023 260.73)"
+        ]
+      },
+      "hover-ground": {
+        "role": "neutral",
+        "displayName": "hover-ground",
+        "canonical": "#eef2ff",
+        "tonalRamp": [
+          "oklch(15% 0.0045 272.31)",
+          "oklch(27% 0.0090 272.31)",
+          "oklch(39% 0.0143 272.31)",
+          "oklch(51% 0.0179 272.31)",
+          "oklch(63% 0.0179 272.31)",
+          "oklch(75% 0.0143 272.31)",
+          "oklch(87% 0.0081 272.31)",
+          "oklch(95% 0.0027 272.31)"
+        ]
+      },
+      "hover-line": {
+        "role": "neutral",
+        "displayName": "hover-line",
+        "canonical": "#b8c6f6",
+        "tonalRamp": [
+          "oklch(15% 0.0173 272.13)",
+          "oklch(27% 0.0346 272.13)",
+          "oklch(39% 0.0554 272.13)",
+          "oklch(51% 0.0692 272.13)",
+          "oklch(63% 0.0692 272.13)",
+          "oklch(75% 0.0554 272.13)",
+          "oklch(87% 0.0312 272.13)",
+          "oklch(95% 0.0104 272.13)"
+        ]
+      },
+      "focus": {
+        "role": "neutral",
+        "displayName": "focus",
+        "canonical": "#839bf0",
+        "tonalRamp": [
+          "oklch(15% 0.0319 270.89)",
+          "oklch(27% 0.0638 270.89)",
+          "oklch(39% 0.1021 270.89)",
+          "oklch(51% 0.1276 270.89)",
+          "oklch(63% 0.1276 270.89)",
+          "oklch(75% 0.1021 270.89)",
+          "oklch(87% 0.0574 270.89)",
+          "oklch(95% 0.0191 270.89)"
+        ]
+      },
+      "disabled-ground": {
+        "role": "neutral",
+        "displayName": "disabled-ground",
+        "canonical": "#e9ecf3",
+        "tonalRamp": [
+          "oklch(15% 0.0025 267.36)",
+          "oklch(27% 0.0050 267.36)",
+          "oklch(39% 0.0080 267.36)",
+          "oklch(51% 0.0100 267.36)",
+          "oklch(63% 0.0100 267.36)",
+          "oklch(75% 0.0080 267.36)",
+          "oklch(87% 0.0045 267.36)",
+          "oklch(95% 0.0015 267.36)"
+        ]
+      },
+      "disabled-ink": {
+        "role": "neutral",
+        "displayName": "disabled-ink",
+        "canonical": "#687489",
+        "tonalRamp": [
+          "oklch(15% 0.0089 261.64)",
+          "oklch(27% 0.0179 261.64)",
+          "oklch(39% 0.0286 261.64)",
+          "oklch(51% 0.0358 261.64)",
+          "oklch(63% 0.0358 261.64)",
+          "oklch(75% 0.0286 261.64)",
+          "oklch(87% 0.0161 261.64)",
+          "oklch(95% 0.0054 261.64)"
+        ]
+      },
+      "preview-mat": {
+        "role": "neutral",
+        "displayName": "preview-mat",
+        "canonical": "#edf0f5",
+        "tonalRamp": [
+          "oklch(15% 0.0019 260.73)",
+          "oklch(27% 0.0037 260.73)",
+          "oklch(39% 0.0060 260.73)",
+          "oklch(51% 0.0074 260.73)",
+          "oklch(63% 0.0074 260.73)",
+          "oklch(75% 0.0060 260.73)",
+          "oklch(87% 0.0033 260.73)",
+          "oklch(95% 0.0011 260.73)"
+        ]
+      },
+      "video-ground": {
+        "role": "neutral",
+        "displayName": "video-ground",
+        "canonical": "#10131a",
+        "tonalRamp": [
+          "oklch(15% 0.0038 266.77)",
+          "oklch(27% 0.0076 266.77)",
+          "oklch(39% 0.0121 266.77)",
+          "oklch(51% 0.0151 266.77)",
+          "oklch(63% 0.0151 266.77)",
+          "oklch(75% 0.0121 266.77)",
+          "oklch(87% 0.0068 266.77)",
+          "oklch(95% 0.0023 266.77)"
+        ]
+      },
+      "notice-ground": {
+        "role": "neutral",
+        "displayName": "notice-ground",
+        "canonical": "#e9efff",
+        "tonalRamp": [
+          "oklch(15% 0.0056 269.44)",
+          "oklch(27% 0.0112 269.44)",
+          "oklch(39% 0.0180 269.44)",
+          "oklch(51% 0.0225 269.44)",
+          "oklch(63% 0.0225 269.44)",
+          "oklch(75% 0.0180 269.44)",
+          "oklch(87% 0.0101 269.44)",
+          "oklch(95% 0.0034 269.44)"
+        ]
+      },
+      "notice-ink": {
+        "role": "neutral",
+        "displayName": "notice-ink",
+        "canonical": "#254599",
+        "tonalRamp": [
+          "oklch(15% 0.0357 265.02)",
+          "oklch(27% 0.0714 265.02)",
+          "oklch(39% 0.1142 265.02)",
+          "oklch(51% 0.1428 265.02)",
+          "oklch(63% 0.1428 265.02)",
+          "oklch(75% 0.1142 265.02)",
+          "oklch(87% 0.0642 265.02)",
+          "oklch(95% 0.0214 265.02)"
+        ]
+      },
+      "error-ground": {
+        "role": "neutral",
+        "displayName": "error-ground",
+        "canonical": "#fff0ee",
+        "tonalRamp": [
+          "oklch(15% 0.0041 26.65)",
+          "oklch(27% 0.0082 26.65)",
+          "oklch(39% 0.0132 26.65)",
+          "oklch(51% 0.0165 26.65)",
+          "oklch(63% 0.0165 26.65)",
+          "oklch(75% 0.0132 26.65)",
+          "oklch(87% 0.0074 26.65)",
+          "oklch(95% 0.0025 26.65)"
+        ]
+      },
+      "error-ink": {
+        "role": "neutral",
+        "displayName": "error-ink",
+        "canonical": "#8f3340",
+        "tonalRamp": [
+          "oklch(15% 0.0311 15.12)",
+          "oklch(27% 0.0623 15.12)",
+          "oklch(39% 0.0996 15.12)",
+          "oklch(51% 0.1245 15.12)",
+          "oklch(63% 0.1245 15.12)",
+          "oklch(75% 0.0996 15.12)",
+          "oklch(87% 0.0560 15.12)",
+          "oklch(95% 0.0187 15.12)"
+        ]
+      },
+      "danger": {
+        "role": "neutral",
+        "displayName": "danger",
+        "canonical": "#a83643",
+        "tonalRamp": [
+          "oklch(15% 0.0372 17.80)",
+          "oklch(27% 0.0744 17.80)",
+          "oklch(39% 0.1190 17.80)",
+          "oklch(51% 0.1488 17.80)",
+          "oklch(63% 0.1488 17.80)",
+          "oklch(75% 0.1190 17.80)",
+          "oklch(87% 0.0670 17.80)",
+          "oklch(95% 0.0223 17.80)"
+        ]
+      },
+      "live": {
+        "role": "neutral",
+        "displayName": "live",
+        "canonical": "#21815e",
+        "tonalRamp": [
+          "oklch(15% 0.0258 163.91)",
+          "oklch(27% 0.0517 163.91)",
+          "oklch(39% 0.0827 163.91)",
+          "oklch(51% 0.1034 163.91)",
+          "oklch(63% 0.1034 163.91)",
+          "oklch(75% 0.0827 163.91)",
+          "oklch(87% 0.0465 163.91)",
+          "oklch(95% 0.0155 163.91)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "headline": {
+        "displayName": "headline",
+        "purpose": "页面标题，窄屏降至24px。"
+      },
+      "title": {
+        "displayName": "title",
+        "purpose": "内容区标题。"
+      },
+      "body": {
+        "displayName": "body",
+        "purpose": "常规中文界面内容。"
+      },
+      "label": {
+        "displayName": "label",
+        "purpose": "表单标签。"
+      },
+      "button": {
+        "displayName": "button",
+        "purpose": "共享操作按钮。"
+      }
+    },
+    "shadows": [],
+    "motion": [],
+    "breakpoints": [
+      {
+        "name": "compact-desktop",
+        "value": "1100px"
+      },
+      {
+        "name": "top-navigation",
+        "value": "820px"
+      },
+      {
+        "name": "single-column",
+        "value": "650px"
+      },
+      {
+        "name": "vertical-navigation",
+        "value": "365px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "主要按钮",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "共享操作按钮；焦点与悬停对应当前 CSS。",
+      "html": "<button class=\"ds-primary\">主要按钮</button>",
+      "css": ".ds-primary{font-family:Inter,-apple-system,BlinkMacSystemFont,\"PingFang SC\",\"Microsoft YaHei\",sans-serif;font-size:13px;line-height:1.45;display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:40px;padding:8px 14px;border:1px solid #2449cf;border-radius:8px;background:var(--color-cobalt,#2449cf);color:#fff;font-weight:550;cursor:pointer}.ds-primary:hover:not(:disabled){background:#1c3bb4;}.ds-primary:focus-visible{outline:3px solid #839bf0;outline-offset:3px}.ds-primary:disabled{background:#e9ecf3;color:#687489;border-color:#e9ecf3;cursor:default}"
+    },
+    {
+      "name": "次要按钮",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "共享操作按钮；焦点与悬停对应当前 CSS。",
+      "html": "<button class=\"ds-secondary\">次要按钮</button>",
+      "css": ".ds-secondary{font-family:Inter,-apple-system,BlinkMacSystemFont,\"PingFang SC\",\"Microsoft YaHei\",sans-serif;font-size:13px;line-height:1.45;display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:40px;padding:8px 14px;border:1px solid #dce1ea;border-radius:8px;background:#fff;color:var(--color-ink,#17213a);font-weight:550;cursor:pointer}.ds-secondary:hover:not(:disabled){background:#eef2ff;border-color:#b8c6f6;}.ds-secondary:focus-visible{outline:3px solid #839bf0;outline-offset:3px}.ds-secondary:disabled{background:#e9ecf3;color:#687489;border-color:#e9ecf3;cursor:default}"
+    },
+    {
+      "name": "文字按钮",
+      "kind": "button",
+      "refersTo": "button-text",
+      "description": "共享操作按钮；焦点与悬停对应当前 CSS。",
+      "html": "<button class=\"ds-text\">文字按钮</button>",
+      "css": ".ds-text{font-family:Inter,-apple-system,BlinkMacSystemFont,\"PingFang SC\",\"Microsoft YaHei\",sans-serif;font-size:13px;line-height:1.45;display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:40px;padding:8px 0;border:1px solid transparent;border-radius:8px;background:transparent;color:var(--color-cobalt,#2449cf);font-weight:550;cursor:pointer}.ds-text:hover:not(:disabled){background:#eef2ff;}.ds-text:focus-visible{outline:3px solid #839bf0;outline-offset:3px}.ds-text:disabled{background:#e9ecf3;color:#687489;border-color:#e9ecf3;cursor:default}"
+    },
+    {
+      "name": "文本输入",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "标准单行字段。",
+      "html": "<label class=\"ds-field\">人物名称<input class=\"ds-input\" placeholder=\"输入人物名称\"></label>",
+      "css": ".ds-field{display:grid;gap:7px;font:560 13px/1.55 Inter,\"PingFang SC\",sans-serif;color:var(--color-ink,#17213a)}.ds-input{font:400 14px/1.5 Inter,\"PingFang SC\",sans-serif;height:42px;padding:10px 12px;border:1px solid #d9dfe9;border-radius:8px;background:white;color:var(--color-ink,#17213a);min-width:0}.ds-input::placeholder{color:#747e90}.ds-input:focus-visible{outline:3px solid #839bf0;outline-offset:3px}.ds-input:disabled{background:#f0f2f6;color:#727d90}"
+    },
+    {
+      "name": "选中导航",
+      "kind": "nav",
+      "refersTo": "navigation-selected",
+      "description": "四目的地导航的当前项。",
+      "html": "<nav class=\"ds-nav\"><button class=\"ds-nav-item\" aria-current=\"page\">直播控制</button></nav>",
+      "css": ".ds-nav{display:grid;gap:8px}.ds-nav-item{font-family:Inter,-apple-system,BlinkMacSystemFont,\"PingFang SC\",\"Microsoft YaHei\",sans-serif;font-size:13px;line-height:1.45;text-align:left;min-height:44px;padding:12px 14px;border:1px solid transparent;border-radius:8px;font-size:14px;background:#ebf0ff;color:var(--color-cobalt,#2449cf);font-weight:550;cursor:pointer}.ds-nav-item:hover{background:#eef2ff;border-color:#b8c6f6}.ds-nav-item:focus-visible{outline:3px solid #839bf0;outline-offset:3px}"
+    },
+    {
+      "name": "口播容器",
+      "kind": "card",
+      "refersTo": "speech-container",
+      "description": "文本输入和底部操作组成的扁平容器。",
+      "html": "<section class=\"ds-speech\"><textarea class=\"ds-speech-input\" aria-label=\"口播内容\" placeholder=\"输入本次口播原文\"></textarea><div class=\"ds-speech-footer\">口播内容将按原文加入队列</div></section>",
+      "css": ".ds-speech{border:1px solid #dce1e9;border-radius:12px;overflow:hidden;background:white}.ds-speech-input{display:block;width:100%;height:95px;padding:15px 17px;border:0;resize:vertical;font:14px/1.5 Inter,\"PingFang SC\",sans-serif;color:var(--color-ink,#17213a)}.ds-speech-input:focus-visible{outline:3px solid #839bf0;outline-offset:-3px}.ds-speech-footer{padding:9px 12px 9px 17px;border-top:1px solid var(--color-line,#e4e8ef);font:12px/1.55 Inter,\"PingFang SC\",sans-serif;color:var(--color-muted,#646e81)}"
+    }
+  ],
+  "narrative": {
+    "northStar": "钴蓝 · 轻盈编辑室",
+    "overview": "以钴蓝 · 轻盈编辑室为视觉北极星：冷白底、清楚的编辑列和克制的操作强调，使普通运营者能够阅读素材、确认状态并完成直播操作。桌面是主要工作环境，手机延续同一控件语言。\n\n系统使用紧凑中文无衬线层级、细分隔线和真实上传素材。蓝色标记当前选择及主要操作；平面分组承担信息组织，图像与视频承担内容表现。",
+    "keyCharacteristics": [
+      "冷白底与钴蓝操作强调",
+      "细分隔线与编辑列对齐",
+      "真实素材、明确状态和可恢复错误",
+      "桌面优先，窄屏连续堆叠"
+    ],
+    "rules": [
+      {
+        "name": "The Cobalt Selection Rule",
+        "body": "钴蓝同时标记当前选择和主要行动，状态反馈使用各自语义色。",
+        "section": "colors"
+      },
+      {
+        "name": "The Flat Grouping Rule",
+        "body": "静态编辑内容以分隔和间距组织，避免把每个区域变成同等强调的浮起卡片。",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do 使用钴蓝区分主要操作和当前选择，并保留辅助文字的安静层级。",
+      "Do 延续统一描边 SVG 图标、可见键盘焦点和禁用状态。",
+      "Do 用细分隔线和间距组织编辑内容，素材按真实比例容纳。",
+      "Do 为长中文名称、地址和来源标识提供换行空间。"
+    ],
+    "donts": [
+      "Don't 引入装饰性大标题、虚构运营指标或替代真实素材的插画。",
+      "Don't 把所有内容都封装成同等强调的卡片。",
+      "Don't 只暴露后端错误原文而缺少中文说明与恢复操作。"
+    ]
+  }
+}
