@@ -59,7 +59,6 @@ func sessionForReplies(t *testing.T, f *fixture, mode string) (string, string) {
 
 func TestCommentStormQueueAndExpiry(t *testing.T) {
 	f := newFixture(t)
-	f.a.Close()
 	now := f.a.c.Clock()
 	var seconds atomic.Int64
 	f.a.c.Clock = func() time.Time { return now.Add(time.Duration(seconds.Load()) * time.Second) }
@@ -97,7 +96,6 @@ func TestCommentStormQueueAndExpiry(t *testing.T) {
 }
 func TestFixedScriptsRemainVerbatim(t *testing.T) {
 	f := newFixture(t)
-	f.a.Close()
 	sid, token := sessionForReplies(t, f, "companion")
 	var events []object
 	for _, k := range []string{"comment", "welcome", "gift", "like"} {
@@ -123,7 +121,6 @@ func TestFixedScriptsRemainVerbatim(t *testing.T) {
 }
 func TestInteractionContinuesTopic(t *testing.T) {
 	f := newFixture(t)
-	f.a.Close()
 	sid, token := sessionForReplies(t, f, "companion")
 	for i := 0; i < 5; i++ {
 		_, e := f.a.db.Exec(`INSERT INTO host_topics VALUES(?, 'a1',?,?,'[{"id":"one","text":"开头"},{"id":"two","text":"接下来"}]','ready',1)`, fmt.Sprint(i), fmt.Sprint(i), "窗边植物"+fmt.Sprint(i))
@@ -202,7 +199,6 @@ func TestStaleInteractionNeverSubmits(t *testing.T) {
 	for _, change := range []string{"persona", "session"} {
 		t.Run(change, func(t *testing.T) {
 			f := newFixture(t)
-			f.a.Close()
 			sid, token := sessionForReplies(t, f, "companion")
 			entered, release := make(chan struct{}), make(chan struct{})
 			modelFixture(t, f.a, func(sys string) string {
@@ -246,7 +242,6 @@ func TestStaleInteractionNeverSubmits(t *testing.T) {
 
 func TestExpiredRedeliveryKeepsFirstArrival(t *testing.T) {
 	f := newFixture(t)
-	f.a.Close()
 	now := f.a.c.Clock()
 	var offset atomic.Int64
 	f.a.c.Clock = func() time.Time { return now.Add(time.Duration(offset.Load()) * time.Second) }
@@ -271,7 +266,6 @@ func TestScriptChangeAcrossFailedSubmission(t *testing.T) {
 	for _, initialFixed := range []bool{false, true} {
 		t.Run(fmt.Sprint(initialFixed), func(t *testing.T) {
 			f := newFixture(t)
-			f.a.Close()
 			sid, token := sessionForReplies(t, f, "fixed")
 			setFixed := func() {
 				if e := f.a.put("scripts", object{"id": "fixed", "avatarId": "a1", "kind": "comment", "text": "固定原文"}); e != nil {
@@ -322,7 +316,6 @@ func TestCollectorEventAgeMigration(t *testing.T) {
 	for _, legacyState := range []bool{false, true} {
 		t.Run(fmt.Sprint(legacyState), func(t *testing.T) {
 			f := newFixture(t)
-			f.a.Close()
 			schema := "session_id TEXT,id TEXT,PRIMARY KEY(session_id,id)"
 			if legacyState {
 				schema = "session_id TEXT,id TEXT,state TEXT NOT NULL DEFAULT 'done' CHECK(state IN ('pending','done')),PRIMARY KEY(session_id,id)"
@@ -363,7 +356,6 @@ func TestCollectorEventAgeMigration(t *testing.T) {
 
 func TestRetryPreemptsApprovedHostDraft(t *testing.T) {
 	f := newFixture(t)
-	f.a.Close()
 	origin := f.a.c.Clock()
 	var seconds atomic.Int64
 	f.a.c.Clock = func() time.Time { return origin.Add(time.Duration(seconds.Load()) * time.Second) }
@@ -457,5 +449,73 @@ func TestRetryPreemptsApprovedHostDraft(t *testing.T) {
 	ack := <-result
 	if queued != 0 || !lastViewer.Equal(origin.Add(2*time.Second)) || ack.Accepted != 1 || len(f.tasks) != 1 || f.tasks[0]["id"] != "retrying" {
 		t.Fatal(queued, lastViewer, ack, f.tasks)
+	}
+}
+
+func TestInteractionClassOutageBackoff(t *testing.T) {
+	f := newFixture(t)
+	sid, token := sessionForReplies(t, f, "companion")
+	now := f.a.c.Clock()
+	f.a.c.Clock = func() time.Time { return now }
+	var calls atomic.Int64
+	var healthy atomic.Bool
+	model := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !healthy.Load() {
+			calls.Add(1)
+			failHTTP(w)
+			return
+		}
+		var req struct{ Messages []struct{ Content string } }
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Error(err)
+			return
+		}
+		if req.Messages[0].Content != auditRules {
+			calls.Add(1)
+		}
+		replyFixture(w, req.Messages[0].Content == auditRules)
+	}))
+	defer model.Close()
+	f.a.c.LLMURL = model.URL
+	var nextID int
+	burst := func() []object {
+		var events []object
+		for i := 0; i < 4; i++ {
+			nextID++
+			events = append(events, object{"id": fmt.Sprint(nextID), "kind": "comment", "text": "叶片"})
+		}
+		return events
+	}
+	var last []object
+	for i, seconds := range []int{5, 15, 30, 60, 60} {
+		last = burst()
+		ack := collectTurns(t, f, sid, token, last)
+		if calls.Load() != int64(i+1) || len(ack.Retry) != 4 {
+			t.Fatalf("burst %d: model calls=%d retry=%v", i, calls.Load(), ack.Retry)
+		}
+		now = now.Add(time.Duration(seconds)*time.Second - time.Millisecond)
+		ack = collectTurns(t, f, sid, token, burst())
+		if calls.Load() != int64(i+1) || len(ack.Retry) != 4 {
+			t.Fatal("early requests", calls.Load(), ack)
+		}
+		now = now.Add(time.Millisecond)
+	}
+	healthy.Store(true)
+	if ack := collectTurns(t, f, sid, token, last); len(ack.Processed) != 4 || calls.Load() != 5 {
+		t.Fatal("expired redeliveries", ack, calls.Load())
+	}
+	fresh := burst()[:1]
+	if ack := collectTurns(t, f, sid, token, fresh); len(ack.Processed) != 1 || len(f.tasks) != 1 || f.tasks[0]["id"] != fresh[0]["id"] {
+		t.Fatal("recovery", ack, f.tasks)
+	}
+	healthy.Store(false)
+	next := burst()[:1]
+	if ack := collectTurns(t, f, sid, token, next); len(ack.Retry) != 1 || calls.Load() != 7 {
+		t.Fatal("failure after recovery", ack, calls.Load())
+	}
+	now = now.Add(5 * time.Second)
+	healthy.Store(true)
+	if ack := collectTurns(t, f, sid, token, next); len(ack.Processed) != 1 || len(f.tasks) != 2 || f.tasks[1]["id"] != next[0]["id"] {
+		t.Fatal("reset deadline/stable id", ack, f.tasks)
 	}
 }

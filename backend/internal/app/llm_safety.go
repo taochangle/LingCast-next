@@ -168,7 +168,12 @@ func (a *App) checkCandidate(ctx context.Context, c SpeechCandidate) (SafetyDeci
 		return deny, nil
 	}
 	lower := strings.ToLower(c.Text)
-	for _, pattern := range []string{"system prompt", "ignore previous", "系统提示词", "忽略之前", "修改配置", "修改设置", "api key", "api_key", "密钥", "streamkey", "bearer ", "https://", "http://"} {
+	for _, pattern := range []string{"api key", "api_key", "密钥", "streamkey", "bearer "} {
+		if strings.Contains(lower, pattern) {
+			return SafetyDecision{Category: "secret-exfiltration"}, nil
+		}
+	}
+	for _, pattern := range []string{"system prompt", "ignore previous", "系统提示词", "忽略之前", "修改配置", "修改设置", "https://", "http://"} {
 		if strings.Contains(lower, pattern) {
 			return SafetyDecision{Category: "injection"}, nil
 		}

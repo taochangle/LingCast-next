@@ -269,7 +269,7 @@ def verify():
     ack = request(app, "/api/collector/events", 200, collector, "POST", comment)
     assert ack["processedIds"] == ["fixture-question"] and ack["retryIds"] == []
     eventually(lambda: completed_text("我喜欢浅绿色，柔和又明亮。"))
-    print("Autonomous speech, Go receipt consumption and audited viewer reply verified", flush=True)
+    print("Autonomous speech, Go receipt consumption and completed viewer reply verified", flush=True)
 
     assert request(app, f"{live_path}/stop", 200, admin, "POST")["status"] == "stopped"
     assert request(app, "/api/live", 200, admin)["session"] is None

@@ -169,6 +169,11 @@ func (a *App) reserveJob(avatar string) (*topicFlight, bool, error) {
 	a.topicFlights[avatar] = job
 	return job, true, nil
 }
+func generationBackoff(failures int) time.Duration {
+	delays := [...]time.Duration{5, 15, 30, 60}
+	return delays[min(failures, len(delays)-1)] * time.Second
+}
+
 func (a *App) runTopicJob(ctx context.Context, in HostInput, manual bool, job *topicFlight) {
 	ts, e := a.generateReserve(ctx, in, manual)
 	a.mu.Lock()
@@ -177,8 +182,7 @@ func (a *App) runTopicJob(ctx context.Context, in HostInput, manual bool, job *t
 	if e == nil || ctx.Err() != nil || errors.Is(e, errStale) {
 		job.failures = 0
 	} else {
-		delay := []time.Duration{5, 15, 30, 60}
-		job.next = a.c.Clock().Add(delay[min(job.failures, 3)] * time.Second)
+		job.next = a.c.Clock().Add(generationBackoff(job.failures))
 		job.failures++
 	}
 	close(job.done)

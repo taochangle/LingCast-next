@@ -21,18 +21,42 @@ func safeSession(s object) object {
 	}
 	return o
 }
+
+// A failed output still owns the live slot until stop reconciles the Worker.
+func (a *App) markWorkerFailed(sid string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	s := a.current()
+	if str(s, "id") != sid || s["status"] != "live" {
+		return nil
+	}
+	s["status"] = "error"
+	s["error"] = "Worker unavailable"
+	s["collectorHash"] = ""
+	a.invalidateHostLocked(sid)
+	return a.put("sessions", s)
+}
+
 func (a *App) live(w http.ResponseWriter, r *http.Request, p []string) {
 	if len(p) == 2 && r.Method == "GET" {
 		session := safeSession(a.current())
 		if session != nil && session["status"] == "live" {
-			var state struct {
-				SessionID  string
-				RelayState string
-			}
-			session["relayState"] = "unknown"
+			var state hostWorkerState
+			sid := str(session, "id")
 			ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 			defer cancel()
-			if a.worker(ctx, "GET", "/status", nil, &state) == nil && state.SessionID == session["id"] {
+			observed := a.worker(ctx, "GET", "/status", nil, &state) == nil && state.SessionID == sid
+			if observed && state.Status == "error" {
+				if err := a.markWorkerFailed(sid); err != nil {
+					fail(w, 500, "Storage failure")
+					return
+				}
+			}
+			session = safeSession(a.current())
+			if str(session, "status") == "live" {
+				session["relayState"] = "unknown"
+			}
+			if observed && str(session, "id") == sid {
 				switch state.RelayState {
 				case "disabled", "running", "failed":
 					session["relayState"] = state.RelayState

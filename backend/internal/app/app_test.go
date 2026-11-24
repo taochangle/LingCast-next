@@ -102,12 +102,13 @@ func newFixture(t *testing.T) *fixture {
 		}
 	}))
 	t.Cleanup(f.worker.Close)
-	h, e := New(Config{DataDir: t.TempDir(), AdminToken: "a", MediaToken: "m", WorkerURL: f.worker.URL, WorkerToken: "w", PublicBaseURL: "http://business", Clock: func() time.Time { return time.Date(2026, 11, 24, 10, 20, 30, 0, time.UTC) }})
+	a, e := newApp(Config{DataDir: t.TempDir(), AdminToken: "a", MediaToken: "m", WorkerURL: f.worker.URL, WorkerToken: "w", PublicBaseURL: "http://business", Clock: func() time.Time { return time.Date(2026, 11, 24, 10, 20, 30, 0, time.UTC) }})
 	if e != nil {
 		t.Fatal(e)
 	}
-	f.h = h
-	f.a = h.(*App)
+	// Fixtures drive ticks explicitly against their injected clock.
+	f.h = a
+	f.a = a
 	t.Cleanup(func() { _ = f.a.Close() })
 	for k, o := range map[string]object{"avatars": {"id": "a1", "name": "A", "persona": "P", "voiceId": "v"}, "looks": {"id": "l1", "avatarId": "a1", "imageId": "m1", "defaultIdleId": "i1"}, "idles": {"id": "i1", "lookId": "l1", "mediaId": "m2"}} {
 		if e = f.a.put(k, o); e != nil {
@@ -290,7 +291,6 @@ func TestStopDuringStartCannotResurrect(t *testing.T) {
 }
 func TestHostDoesNotOverlapOrRewrite(t *testing.T) {
 	f := newFixture(t)
-	_ = f.a.Close()
 	_ = f.a.put("scripts", object{"id": "host1", "avatarId": "a1", "kind": "host", "text": "host exact"})
 	_ = f.start()
 	s := f.a.current()

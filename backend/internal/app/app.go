@@ -51,6 +51,15 @@ func id() string {
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[:4], b[4:6], b[6:8], b[8:10], b[10:])
 }
 func New(c Config) (http.Handler, error) {
+	a, err := newApp(c)
+	if err != nil {
+		return nil, err
+	}
+	go a.hostLoop()
+	return a, nil
+}
+
+func newApp(c Config) (*App, error) {
 	if c.AdminToken == "" || c.MediaToken == "" {
 		return nil, errors.New("ADMIN_TOKEN and MEDIA_TOKEN required")
 	}
@@ -126,7 +135,6 @@ func New(c Config) (http.Handler, error) {
 		}
 	}
 
-	go a.hostLoop()
 	return a, nil
 }
 func write(w http.ResponseWriter, n int, v any) {
@@ -216,13 +224,25 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func str(o object, k string) string { s, _ := o[k].(string); return s }
 func hash(s string) string          { h := sha256.Sum256([]byte(s)); return hex.EncodeToString(h[:]) }
 
+func (a *App) closedLocked() bool {
+	select {
+	case <-a.done:
+		return true
+	default:
+		return false
+	}
+}
+
 // Close terminates background polling. Call after HTTP shutdown.
 func (a *App) Close() error {
 	a.closeOnce.Do(func() {
-		close(a.done)
 		a.mu.Lock()
+		close(a.done)
 		if a.director != nil {
-			a.invalidateHostLocked(a.director.sid)
+			if a.director.cancel != nil {
+				a.director.cancel()
+			}
+			a.director = nil
 		}
 		a.mu.Unlock()
 	})

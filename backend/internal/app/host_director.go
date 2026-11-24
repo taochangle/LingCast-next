@@ -33,6 +33,9 @@ func hostPause(sw, quiet bool, pick func(int) int) time.Duration {
 	return time.Duration(lo+pick(hi-lo+1)) * time.Second
 }
 func (a *App) directorLocked(s object) *hostDirector {
+	if a.closedLocked() {
+		return nil
+	}
 	sid := str(s, "id")
 	if a.director == nil || a.director.sid != sid {
 		if a.director != nil && a.director.cancel != nil {
@@ -75,8 +78,8 @@ func (a *App) hostStatusLocked(s object) HostStatus {
 		mode = "fixed"
 	}
 	status := HostStatus{Mode: mode, State: "waiting"}
-	if mode == "companion" {
-		status = a.directorLocked(s).status
+	if mode == "companion" && a.director != nil && a.director.sid == str(s, "id") {
+		status = a.director.status
 	}
 	if s["hostEnabled"] != true || s["status"] != "live" {
 		status.State = "paused"
@@ -94,26 +97,17 @@ func (a *App) CompanionStatus(sid string) HostStatus {
 	return a.hostStatusLocked(s)
 }
 func (a *App) selectHostAngle(in *HostInput) error {
-	ts, e := a.listTopics(in.AvatarID)
+	currentID := ""
+	if in.CurrentTopic != nil {
+		currentID = in.CurrentTopic.ID
+	}
+	ts, e := a.queryTopics(in.AvatarID,
+		"AND (state='ready' OR (state='active' AND id=?)) AND "+selectableHostTopic+
+			" ORDER BY (state='active') DESC,created_at DESC,rowid DESC", currentID)
 	if e != nil {
 		return e
 	}
-	if in.CurrentTopic != nil && in.CurrentTopic.State == "active" {
-		ts = append([]HostTopic{*in.CurrentTopic}, ts...)
-	}
 	for _, t := range ts {
-		if t.State != "ready" && !(t.State == "active" && in.CurrentTopic != nil && t.ID == in.CurrentTopic.ID) {
-			continue
-		}
-		// A missing terminal receipt leaves this topic unresolved. Another
-		// topic can continue without implying the unknown angle was spoken.
-		var selectable bool
-		if e = a.db.QueryRow("SELECT "+selectableHostTopic+" FROM host_topics t WHERE t.id=?", t.ID).Scan(&selectable); e != nil {
-			return e
-		}
-		if !selectable {
-			continue
-		}
 		for _, angle := range t.Angles {
 			var used bool
 			e = a.db.QueryRow("SELECT EXISTS(SELECT 1 FROM host_tasks WHERE session_id=? AND topic_id=? AND angle_id=? AND state IN ('pending','completed','unknown') UNION ALL SELECT 1 FROM host_recent_keys WHERE avatar_id=? AND key=? AND seen_at>=?)", in.SessionID, t.ID, angle.ID, in.AvatarID, t.Key+"/"+speechKey(angle.Text), in.ServerTime.Add(-7*24*time.Hour).Unix()).Scan(&used)
@@ -131,15 +125,18 @@ func (a *App) selectHostAngle(in *HostInput) error {
 }
 
 type hostWorkerState struct {
-	SessionID, Status   string
-	Speaking            bool
-	QueueDepth          int
-	LastTaskCompletedAt float64
+	SessionID, Status, RelayState string
+	Speaking                      bool
+	QueueDepth                    int
+	LastTaskCompletedAt           float64
 }
 
 func (a *App) hostWorker(ctx context.Context, sid string) (hostWorkerState, error) {
 	var w hostWorkerState
 	e := a.worker(ctx, "GET", "/status", nil, &w)
+	if e == nil && w.SessionID == sid && w.Status == "error" {
+		e = a.markWorkerFailed(sid)
+	}
 	if e == nil && (w.SessionID != sid || w.Status != "live") {
 		e = errStale
 	}
@@ -164,7 +161,7 @@ func (a *App) pollPlayed(ctx context.Context, sid string) error {
 func (a *App) CompanionTick(parent context.Context, sid string) (err error) {
 	a.mu.Lock()
 	s := a.current()
-	if str(s, "id") != sid || s["status"] != "live" || s["hostMode"] != "companion" {
+	if a.closedLocked() || str(s, "id") != sid || s["status"] != "live" || s["hostMode"] != "companion" {
 		a.mu.Unlock()
 		return nil
 	}
@@ -187,17 +184,20 @@ func (a *App) CompanionTick(parent context.Context, sid string) (err error) {
 		}
 		d.cancel = nil
 		if err != nil && parent.Err() == nil {
-			delays := []int{5, 15, 30, 60}
-			delay := delays[min(d.failures, 3)]
+			at := a.c.Clock().Add(generationBackoff(d.failures))
 			d.failures++
-			at := a.c.Clock().Add(time.Duration(delay) * time.Second)
 			d.status.NextEligibleAt = &at
 			d.status.State = "degraded"
 			d.status.LastError = "主持暂时不可用，稍后自动重试"
 		}
 	}()
-	if e := a.pollPlayed(ctx, sid); e != nil {
+	receiptErr := a.pollPlayed(ctx, sid)
+	state, e := a.hostWorker(ctx, sid)
+	if e != nil {
 		return e
+	}
+	if receiptErr != nil {
+		return receiptErr
 	}
 	if s["hostEnabled"] != true {
 		return nil
@@ -208,10 +208,6 @@ func (a *App) CompanionTick(parent context.Context, sid string) (err error) {
 		return nil
 	}
 	a.mu.Unlock()
-	state, e := a.hostWorker(ctx, sid)
-	if e != nil {
-		return e
-	}
 	if state.Speaking || state.QueueDepth > 0 {
 		a.mu.Lock()
 		d.status.State = "waiting"

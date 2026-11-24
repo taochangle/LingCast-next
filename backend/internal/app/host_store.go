@@ -21,6 +21,7 @@ func migrateHost(db *sql.DB) error {
  CREATE TABLE IF NOT EXISTS host_recent_keys(avatar_id TEXT NOT NULL, key TEXT NOT NULL, seen_at INTEGER NOT NULL, PRIMARY KEY(avatar_id,key));
  CREATE TABLE IF NOT EXISTS host_runs(session_id TEXT PRIMARY KEY, avatar_id TEXT NOT NULL,topic_id TEXT NOT NULL DEFAULT '',angle_id TEXT NOT NULL DEFAULT '',last_seq INTEGER NOT NULL DEFAULT 0);
  CREATE TABLE IF NOT EXISTS host_tasks(session_id TEXT NOT NULL,task_id TEXT NOT NULL,source TEXT NOT NULL,topic_id TEXT NOT NULL,angle_id TEXT NOT NULL,state TEXT NOT NULL DEFAULT 'pending',PRIMARY KEY(session_id,task_id));
+ CREATE INDEX IF NOT EXISTS host_tasks_unresolved ON host_tasks(topic_id,session_id) WHERE state IN ('pending','unknown');
  CREATE TABLE IF NOT EXISTS host_turns(session_id TEXT NOT NULL,task_id TEXT NOT NULL,source TEXT NOT NULL DEFAULT 'spoken',text TEXT NOT NULL,completed_at INTEGER NOT NULL,seq INTEGER NOT NULL,PRIMARY KEY(session_id,task_id));
  DELETE FROM host_turns WHERE source!='host' AND NOT EXISTS(SELECT 1 FROM live_slot WHERE session_id=host_turns.session_id);
  UPDATE objects SET body=json_set(body,'$.hostMode','fixed','$.interests',json('[]'),'$.revision',1) WHERE kind='avatars' AND json_type(body,'$.hostMode') IS NULL`)
@@ -355,7 +356,16 @@ func (a *App) pruneHostHistory(ctx context.Context, avatar string) error {
 }
 func pruneHostTx(tx *sql.Tx, avatar string, now time.Time) error {
 	cutoff := now.Add(-7 * 24 * time.Hour).Unix()
-	_, e := tx.Exec(`DELETE FROM host_recent_keys WHERE avatar_id=? AND (seen_at<? OR rowid NOT IN(SELECT rowid FROM host_recent_keys WHERE avatar_id=? ORDER BY seen_at DESC,rowid DESC LIMIT 200))`, avatar, cutoff, avatar)
+	_, e := tx.Exec(`UPDATE host_topics SET state='disabled'
+		WHERE avatar_id=? AND state='ready' AND EXISTS (
+			SELECT 1 FROM host_tasks h
+			WHERE h.topic_id=host_topics.id AND h.state IN ('pending','unknown')
+			AND NOT EXISTS (SELECT 1 FROM live_slot WHERE session_id=h.session_id)
+		)`, avatar)
+	if e != nil {
+		return e
+	}
+	_, e = tx.Exec(`DELETE FROM host_recent_keys WHERE avatar_id=? AND (seen_at<? OR rowid NOT IN(SELECT rowid FROM host_recent_keys WHERE avatar_id=? ORDER BY seen_at DESC,rowid DESC LIMIT 200))`, avatar, cutoff, avatar)
 	if e != nil {
 		return e
 	}

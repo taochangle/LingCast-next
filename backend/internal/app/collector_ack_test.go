@@ -9,6 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 type collectorAck struct {
@@ -30,7 +31,6 @@ func readAck(t *testing.T, w *httptest.ResponseRecorder) collectorAck {
 }
 func TestCollectorPartialFailuresAndDurableAcknowledgement(t *testing.T) {
 	f := newFixture(t)
-	_ = f.a.Close()
 	w := f.start()
 	var started object
 	_ = json.Unmarshal(w.Body.Bytes(), &started)
@@ -66,15 +66,17 @@ func TestCollectorPartialFailuresAndDurableAcknowledgement(t *testing.T) {
 	}))
 	defer worker.Close()
 	f.a.c.WorkerURL = worker.URL
-	body := fmt.Sprintf(`{"sessionId":%q,"platform":"douyin","events":[{"id":"good","kind":"comment","text":"good"},{"id":"bad-llm","kind":"comment","text":"bad-llm"},{"id":"bad-worker","kind":"comment","text":"worker"}]}`, sid)
+	body := fmt.Sprintf(`{"sessionId":%q,"platform":"douyin","events":[{"id":"good","kind":"comment","text":"good"},{"id":"bad-worker","kind":"comment","text":"worker"},{"id":"bad-llm","kind":"comment","text":"bad-llm"}]}`, sid)
 	token := str(started, "collectorToken")
 	ack := readAck(t, f.req("POST", "/api/collector/events", body, token))
-	if ack.Accepted != 1 || strings.Join(ack.Processed, ",") != "good" || strings.Join(ack.Retry, ",") != "bad-llm,bad-worker" {
+	if ack.Accepted != 1 || strings.Join(ack.Processed, ",") != "good" || strings.Join(ack.Retry, ",") != "bad-worker,bad-llm" {
 		t.Fatal(ack)
 	}
 	fail.Store(false)
+	recovered := f.a.c.Clock().Add(5 * time.Second)
+	f.a.c.Clock = func() time.Time { return recovered }
 	ack = readAck(t, f.req("POST", "/api/collector/events", body, token))
-	if ack.Accepted != 2 || strings.Join(ack.Processed, ",") != "good,bad-llm,bad-worker" || len(ack.Retry) != 0 {
+	if ack.Accepted != 2 || strings.Join(ack.Processed, ",") != "good,bad-worker,bad-llm" || len(ack.Retry) != 0 {
 		t.Fatal(ack)
 	}
 	mu.Lock()
@@ -86,7 +88,6 @@ func TestCollectorPartialFailuresAndDurableAcknowledgement(t *testing.T) {
 func failHTTP(w http.ResponseWriter) { write(w, 503, object{"error": "temporary"}) }
 func TestCollectorPendingDuplicateRetries(t *testing.T) {
 	f := newFixture(t)
-	_ = f.a.Close()
 	w := f.start()
 	var started object
 	_ = json.Unmarshal(w.Body.Bytes(), &started)
@@ -150,7 +151,6 @@ func TestStartupClearsPendingKeepsDone(t *testing.T) {
 }
 func TestCollectorIntentionalSkipAcknowledged(t *testing.T) {
 	f := newFixture(t)
-	_ = f.a.Close()
 	w := f.start()
 	var started object
 	_ = json.Unmarshal(w.Body.Bytes(), &started)

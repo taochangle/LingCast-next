@@ -26,7 +26,6 @@ func TestPromptAttackCorpus(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newFixture(t)
-			f.a.Close()
 			sid, token := sessionForReplies(t, f, "companion")
 			var phase string
 			var isolatedReviews int

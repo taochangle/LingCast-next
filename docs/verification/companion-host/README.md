@@ -6,7 +6,7 @@
 | Worker `python3 -m unittest discover -s worker/tests -v` | 36 项，35 项通过。主机缺 OpenCV，跳过一项真实 FFmpeg 输出测试。使用带依赖的本地 Worker 容器挂载同一份源码，单独运行该项通过。 |
 | 前端 `npm test -- --run` 与 `npm run build` | 28 项通过，生产构建成功。 |
 | `bash scripts/check-compose.sh` | 业务单独部署、AI 常驻模型、合并常驻模型、合并远端模型、独立 AI 远端模型，5 种配置通过解析。 |
-| `bash scripts/smoke-compose.sh` | 本地真实 Go、Python Worker、FFmpeg、SRS，合成 LLM、静音 PCM 和色块画面。私有 FLV 可读；手动、固定和长稿按原文到达。自主段的 Worker 完成回执可读，下一次实际模型 HTTP 请求包含该已播段。本地 collector 事件触发审核接话，Worker 记录完整回复。停播后拒绝旧令牌和旧任务。 |
+| `bash scripts/smoke-compose.sh` | 本地真实 Go、Python Worker、FFmpeg、SRS，合成 LLM、静音 PCM 和色块画面。私有 FLV 可读；手动、固定和长稿按原文到达。自主段的 Worker 完成回执可读，下一次实际模型 HTTP 请求包含该已播段。本地 collector 事件触发接话，Worker 记录完整回复的完成回执。停播后拒绝旧令牌和旧任务。 |
 
 ## 90 分钟假时钟
 

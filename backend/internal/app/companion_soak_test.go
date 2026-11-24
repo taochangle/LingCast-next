@@ -16,7 +16,6 @@ import (
 // Each minute is a scheduling observation, not a minute of measured audio.
 func TestCompanionSoak90Minutes(t *testing.T) {
 	f := newFixture(t)
-	f.a.Close() // drive every tick explicitly
 	sid, token := sessionForReplies(t, f, "companion")
 	toggle := func(on bool) {
 		t.Helper()

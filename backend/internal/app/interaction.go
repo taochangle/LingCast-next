@@ -226,15 +226,16 @@ type replyJob struct {
 	result  chan bool
 }
 type replyQueue struct {
-	sid     string
-	active  bool
-	queue   []replyJob
-	history []ViewerTurn
+	sid         string
+	active      bool
+	queue       []replyJob
+	history     []ViewerTurn
+	failures    int
+	nextAttempt time.Time
 }
 
 func (a *App) viewerArrivedLocked(s object, arrived time.Time) {
-	if s["hostMode"] == "companion" {
-		a.directorLocked(s)
+	if s["hostMode"] == "companion" && a.directorLocked(s) != nil {
 		a.invalidateHostLocked(str(s, "id"))
 		// A retry preempts drafts, but the original arrival determines quiet time.
 		if arrived.After(a.director.lastViewer) {
@@ -298,9 +299,13 @@ func (a *App) runReplies(q *replyQueue, s object, job replyJob) {
 		a.mu.Lock()
 		var err error
 		remember := false
-		if str(a.current(), "id") != q.sid {
+		sNow := a.current()
+		now := a.c.Clock()
+		if str(sNow, "id") != q.sid || sNow["status"] != "live" {
 			err = errors.New("Session ended")
-		} else if a.c.Clock().Sub(job.arrived) <= 30*time.Second {
+		} else if now.Sub(job.arrived) <= 30*time.Second && now.Before(q.nextAttempt) {
+			err = errBackoff // The collector can retry this ID within its original lifetime.
+		} else if now.Sub(job.arrived) <= 30*time.Second {
 			var in HostInput
 			in, err = a.LoadHostContext(str(s, "avatarId"), q.sid)
 			if err == nil {
@@ -309,6 +314,13 @@ func (a *App) runReplies(q *replyQueue, s object, job replyJob) {
 				var decision ReplyDecision
 				decision, err = a.BuildInteractionReply(context.Background(), in, job.event)
 				a.mu.Lock()
+				if err != nil {
+					q.nextAttempt = a.c.Clock().Add(generationBackoff(q.failures))
+					q.failures++
+				} else {
+					q.failures = 0
+					q.nextAttempt = time.Time{}
+				}
 				if err == nil && decision.Action == "speak" && a.validHostInput(in) && a.c.Clock().Sub(job.arrived) <= 30*time.Second {
 					err = a.submitEventLocked(s, job.id, "interaction", "comment", decision.Text)
 					remember = err == nil
@@ -347,7 +359,7 @@ func (a *App) hostLoop() {
 func (a *App) hostTick() {
 	a.mu.Lock()
 	s := a.current()
-	if s == nil || s["status"] != "live" {
+	if a.closedLocked() || s == nil || s["status"] != "live" {
 		a.mu.Unlock()
 		return
 	}
@@ -368,7 +380,7 @@ func (a *App) hostTick() {
 	err := a.worker(context.Background(), "GET", "/status", nil, &state)
 	a.mu.Lock()
 	current := a.current()
-	if current == nil || current["id"] != s["id"] || current["status"] != "live" {
+	if a.closedLocked() || current == nil || current["id"] != s["id"] || current["status"] != "live" {
 		a.mu.Unlock()
 		return
 	}

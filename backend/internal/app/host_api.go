@@ -58,7 +58,13 @@ func (a *App) hostTopicsAPI(w http.ResponseWriter, r *http.Request, p []string) 
 	fail(w, 405, "Method not allowed")
 }
 func (a *App) listTopics(avatar string) ([]HostTopic, error) {
-	rows, e := a.db.Query("SELECT id,title,angles,state,created_at,topic_key FROM host_topics WHERE avatar_id=? ORDER BY created_at DESC,rowid DESC LIMIT 200", avatar)
+	return a.queryTopics(avatar, "ORDER BY created_at DESC,rowid DESC LIMIT 200")
+}
+
+// suffix is an application-owned SQL clause. Candidate selection and the
+// admin list share decoding, but apply their own eligibility and limits.
+func (a *App) queryTopics(avatar, suffix string, args ...any) ([]HostTopic, error) {
+	rows, e := a.db.Query("SELECT id,title,angles,state,created_at,topic_key FROM host_topics t WHERE avatar_id=? "+suffix, append([]any{avatar}, args...)...)
 	if e != nil {
 		return nil, e
 	}

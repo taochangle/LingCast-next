@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -383,5 +384,171 @@ func TestLateFailuresRespectReadyCap(t *testing.T) {
 		if err != nil || in.CurrentTopic != nil || len(in.SpokenTurns) != 0 {
 			t.Fatal(in, err)
 		}
+	}
+}
+
+func TestMatchingWorkerErrorOccupiesSlot(t *testing.T) {
+	for _, observer := range []string{"tick", "live-get"} {
+		for _, enabled := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s/%t", observer, enabled), func(t *testing.T) {
+				f := newFixture(t)
+				sid, token := sessionForReplies(t, f, "companion")
+				if enabled {
+					if r := f.req("PATCH", "/api/live/"+sid+"/host", `{"enabled":true}`, "a"); r.Code != 200 {
+						t.Fatal(r.Body.String())
+					}
+				}
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				f.a.mu.Lock()
+				d := f.a.directorLocked(f.a.current())
+				d.cancel = cancel
+				f.a.mu.Unlock()
+				var match atomic.Bool
+				service := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					switch {
+					case r.URL.Path == "/status":
+						workerID := "another-session"
+						if match.Load() {
+							workerID = sid
+						}
+						write(w, 200, object{"status": "error", "sessionId": workerID})
+					case strings.HasSuffix(r.URL.Path, "/task-results"):
+						fail(w, 503, "receipt unavailable")
+					default:
+						f.worker.Config.Handler.ServeHTTP(w, r)
+					}
+				}))
+				defer service.Close()
+				f.a.c.WorkerURL = service.URL
+				get := func() {
+					t.Helper()
+					r := f.req("GET", "/api/live", "", "a")
+					if r.Code != 200 || match.Load() && !strings.Contains(r.Body.String(), `"status":"error"`) {
+						t.Fatal(r.Body.String())
+					}
+				}
+				get()
+				if f.a.current()["status"] != "live" {
+					t.Fatal("unrelated worker invalidated session")
+				}
+				match.Store(true)
+				if observer == "tick" {
+					f.a.hostTick()
+				} else {
+					get()
+				}
+				s := f.a.current()
+				if str(s, "id") != sid || s["status"] != "error" || s["collectorHash"] != "" || str(s, "error") == "" {
+					t.Fatalf("matching failed worker did not revoke active session: status=%v", s["status"])
+				}
+				if observer == "live-get" && ctx.Err() == nil {
+					t.Fatal("open draft was not canceled")
+				}
+				if f.a.director == d {
+					t.Fatal("director still owns failed session draft")
+				}
+				if r := f.req("GET", "/api/live", "", "a"); !strings.Contains(r.Body.String(), `"status":"error"`) {
+					t.Fatal(r.Body.String())
+				}
+				if r := f.req("POST", "/api/collector/events", fmt.Sprintf(`{"sessionId":%q,"platform":"douyin","events":[]}`, sid), token); r.Code != 401 {
+					t.Fatal(r.Code)
+				}
+				if r := f.start(); r.Code != 409 {
+					t.Fatal("slot released early", r.Code)
+				}
+				if r := f.req("POST", "/api/live/"+sid+"/stop", "", "a"); r.Code != 200 || f.a.current() != nil {
+					t.Fatal("stop did not reconcile", r.Code)
+				}
+			})
+		}
+	}
+}
+func TestDirectorSelectsEligibleBeforeDisplayLimit(t *testing.T) {
+	f, sid := directorFixture(t)
+	_, err := f.a.db.Exec(`WITH RECURSIVE seq(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM seq WHERE i<200)
+	INSERT INTO host_topics SELECT 'off'||i,'a1','off'||i,'off','[]','disabled',2 FROM seq`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	topics, err := f.a.listTopics("a1")
+	if err != nil || len(topics) != 200 || topics[199].State != "disabled" {
+		t.Fatal("fixture display", len(topics), err)
+	}
+	modelFixture(t, f.a, approvedDirectorResponse)
+	if err := f.a.CompanionTick(context.Background(), sid); err != nil || len(f.tasks) != 1 {
+		t.Fatal("older ready topic not scheduled", err)
+	}
+}
+func TestUnconfirmedTopicsExpireAfterSession(t *testing.T) {
+	f, sid := directorFixture(t)
+	now := f.a.c.Clock()
+	f.a.c.Clock = func() time.Time { return now }
+	if _, err := f.a.db.Exec("UPDATE host_topics SET created_at=?", now.Unix()); err != nil {
+		t.Fatal(err)
+	}
+	for _, topic := range []string{"a", "b", "c"} {
+		if err := f.a.RegisterPlayback(sid, "held-"+topic, "host", topic, "one"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.a.ApplyTaskResults(sid, TaskResultsPage{NextSeq: 3, Truncated: true, Results: []TaskResult{{Seq: 3, TaskID: "other", State: "failed"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.a.RegisterPlayback(sid, "pending-d", "host", "d", "one"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.a.pruneHostHistory(context.Background(), "a1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.a.RecordPlayed(sid, TaskResult{Seq: 4, TaskID: "held-c", State: "completed", Text: "确认收到", CompletedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	in, err := f.a.LoadHostContext("a1", sid)
+	if err != nil || in.CurrentTopic == nil || in.CurrentTopic.ID != "c" || in.CurrentAngleID != "one" {
+		t.Fatal(in, err)
+	}
+	if r := f.req("POST", "/api/live/"+sid+"/stop", "", "a"); r.Code != 200 {
+		t.Fatal(r.Body.String())
+	}
+	var count int
+	if err := f.a.db.QueryRow("SELECT COUNT(*) FROM host_topics WHERE id IN('a','b','d') AND state='disabled'").Scan(&count); err != nil || count != 3 {
+		t.Fatal("retired count", count, err)
+	}
+	now = now.Add(8 * 24 * time.Hour)
+	if err := f.a.pruneHostHistory(context.Background(), "a1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.a.db.QueryRow("SELECT COUNT(*) FROM host_topics WHERE id IN('a','b','d')").Scan(&count); err != nil || count != 0 {
+		t.Fatal("expired count", count, err)
+	}
+}
+func TestClosedAppCannotStartDirector(t *testing.T) {
+	f, sid := directorFixture(t)
+	if err := f.a.Close(); err != nil {
+		t.Fatal(err)
+	}
+	modelFixture(t, f.a, approvedDirectorResponse)
+	if err := f.a.CompanionTick(context.Background(), sid); err != nil {
+		t.Fatal(err)
+	}
+	f.a.hostTick()
+	f.a.CompanionStatus(sid)
+	if f.a.director != nil || len(f.tasks) != 0 {
+		t.Fatal("director work after shutdown")
+	}
+}
+
+func TestStopBeforeFirstReceiptRetiresTopic(t *testing.T) {
+	f, sid := directorFixture(t)
+	if err := f.a.RegisterPlayback(sid, "first", "host", "a", "one"); err != nil {
+		t.Fatal(err)
+	}
+	if r := f.req("POST", "/api/live/"+sid+"/stop", "", "a"); r.Code != 200 {
+		t.Fatal(r.Body.String())
+	}
+	var remaining int
+	if err := f.a.db.QueryRow("SELECT COUNT(*) FROM host_topics WHERE id='a' AND state='ready'").Scan(&remaining); err != nil || remaining != 0 {
+		t.Fatal("unresolved first topic without receipt cursor", remaining, err)
 	}
 }
