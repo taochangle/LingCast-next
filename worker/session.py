@@ -6,6 +6,8 @@ import shutil
 import tempfile
 import threading
 import time
+from collections import deque
+from datetime import datetime, timezone
 from pathlib import Path
 
 from worker.models import download
@@ -70,6 +72,8 @@ class SessionManager:
             self.current = dict(payload, status="starting", error=None)
             self.cancel = threading.Event()
             self.queue = Scheduler()
+            self.results = deque(maxlen=256)
+            self.result_seq = 0
             self.speaking = False
             self.work = Path(tempfile.mkdtemp(dir=self.cache))
             self.last_completed = None
@@ -179,17 +183,37 @@ class SessionManager:
             if hasattr(output, "drain"):
                 output.drain(cancel)
             with self.lock:
-                if cancel is self.cancel and task["_final"]:
+                if cancel is not self.cancel or cancel.is_set():
+                    return False
+                if task["_final"]:
+                    self._record_result(task, "completed")
                     self.last_completed = time.time()
             return True
         except Exception as error:
-            if not cancel.is_set():
-                self.fail(error, current["sessionId"])
+            with self.lock:
+                if cancel is self.cancel and not cancel.is_set():
+                    self._record_result(task, "failed")
+                    self.fail(error, current["sessionId"])
             return False
         finally:
             with self.lock:
                 if cancel is self.cancel:
                     self.speaking = False
+
+    def _record_result(self, task, state):
+        self.result_seq += 1
+        self.results.append(dict(seq=self.result_seq, taskId=task["id"], state=state,
+                                 text=task["_original"] if state == "completed" else "",
+                                 completedAt=datetime.now(timezone.utc).isoformat()))
+
+    def task_results(self, sid, after):
+        with self.lock:
+            self._check(sid)
+            if after < 0 or after > self.result_seq:
+                raise ValueError("invalid cursor")
+            return dict(results=[r for r in self.results if r["seq"] > after],
+                        nextSeq=self.result_seq,
+                        truncated=bool(self.results and after < self.results[0]["seq"] - 1))
 
     def fail(self, error, sid=None):
         with self.lock:

@@ -53,7 +53,7 @@ class Scheduler:
         self.sequence += 1
         heapq.heappush(
             self.items,
-            (PRIORITY[task["kind"]], self.sequence, dict(task, _expires=expires)),
+            (PRIORITY[task["kind"]], self.sequence, dict(task, _expires=expires, _original=task["text"])),
         )
         return True
 

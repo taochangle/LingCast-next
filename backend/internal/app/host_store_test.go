@@ -51,6 +51,9 @@ func TestHostPlayedContext(t *testing.T) {
 	}
 	sid := str(f.a.current(), "id")
 	now := f.a.c.Clock()
+	if err := f.a.RegisterPlayback(sid, "task1", "manual", "", ""); err != nil {
+		t.Fatal(err)
+	}
 	result := TaskResult{Seq: 1, TaskID: "task1", Text: "已播", CompletedAt: now, State: "completed"}
 	if e := f.a.RecordPlayed(sid, result); e != nil {
 		t.Fatal(e)
@@ -75,7 +78,7 @@ func TestHostPlayedContext(t *testing.T) {
 	if _, e = f.a.db.Exec(`INSERT INTO host_topics VALUES('t','a1','key','题目','[{"id":"a","text":"角度"}]','active',?)`, now.Unix()); e != nil {
 		t.Fatal(e)
 	}
-	if _, e = f.a.db.Exec(`INSERT INTO host_runs(session_id,avatar_id,topic_id,angle_id) VALUES(?,'a1','t','a')`, sid); e != nil {
+	if _, e = f.a.db.Exec(`UPDATE host_runs SET topic_id='t',angle_id='a' WHERE session_id=?`, sid); e != nil {
 		t.Fatal(e)
 	}
 	in, e = f.a.LoadHostContext("a1", sid)

@@ -53,6 +53,9 @@ def handler(manager, token):
                         except Exception:
                             ready = False
                         return self.json({"ready": ready}, 200 if ready else 503)
+                    match = re.fullmatch(r"/sessions/([A-Za-z0-9_-]+)/task-results(?:\?after=([0-9]+))?", self.path)
+                    if match:
+                        return self.json(manager.task_results(match[1], int(match[2] or 0)))
                     if self.path == "/status":
                         return self.json(manager.status())
                     match = re.fullmatch(r"/preview/([A-Za-z0-9_-]+)\.flv", self.path)
