@@ -10,9 +10,11 @@ RUN git init /opt/CosyVoice && git -C /opt/CosyVoice remote add origin https://g
     && git -C /opt/CosyVoice submodule update --init --recursive --depth=1 \
     && test "$(git -C /opt/CosyVoice/third_party/Matcha-TTS rev-parse HEAD)" = dd9105b34bf2be2230f4aa1e4769fb586a3c824e
 COPY services/tts/*requirements.txt /tmp/tts/
+# Whisper's source build imports pkg_resources from the pinned setuptools.
 RUN pip install --no-cache-dir torch==2.3.1+cu121 torchaudio==2.3.1+cu121 --index-url https://download.pytorch.org/whl/cu121 \
     && pip install --no-cache-dir setuptools==75.8.2 wheel==0.45.1 packaging==24.2 cython==0.29.37 numpy==1.26.4 \
     && DS_BUILD_OPS=0 pip install --no-cache-dir --no-build-isolation deepspeed==0.15.1 pyworld==0.3.4 \
+    && pip install --no-cache-dir --no-deps --no-build-isolation openai-whisper==20231117 \
     && pip install --no-cache-dir -r /tmp/tts/requirements.txt \
     && pip check
 WORKDIR /app
