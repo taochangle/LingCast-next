@@ -1,0 +1,330 @@
+"""Clocked BGR/PCM muxer for Linux/WSL2. Based on LingCast ffmpeg_pipe interleaving."""
+
+import base64
+import json
+import os
+import queue
+import select
+import subprocess
+import threading
+import time
+from urllib.parse import urlsplit
+
+
+def terminate(process):
+    if process is None:
+        return
+    if process.poll() is None:
+        process.terminate()
+        try:
+            process.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=3)
+    for stream in (process.stdin, process.stdout, process.stderr):
+        if stream:
+            try:
+                stream.close()
+            except OSError:
+                pass
+
+
+class LiveOutput:
+    def __init__(self, sid, paths):
+        self.sid = sid
+        self.paths = paths
+        self.proc = None
+        self.relay_proc = None
+        self.audio = None
+        self.video = None
+        self.capture = None
+        self.closed = threading.Event()
+        self.packets = queue.Queue(maxsize=50)
+        self.writer = None
+        self.failure = None
+        self.lifecycle = threading.RLock()
+        self.children = []
+        self.rtmp = os.environ.get(
+            "SRS_RTMP_URL", "rtmp://srs:1935/live/{sessionId}"
+        ).replace("{sessionId}", sid)
+
+    def checked(self, args, timeout):
+        with self.lifecycle:
+            if self.closed.is_set():
+                raise RuntimeError("output stopped")
+            process = subprocess.Popen(
+                args, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
+            )
+            self.children.append(process)
+        try:
+            stdout, _ = process.communicate(timeout=timeout)
+            if process.returncode:
+                raise RuntimeError("invalid idle media")
+            return stdout
+        finally:
+            terminate(process)
+            with self.lifecycle:
+                if process in self.children:
+                    self.children.remove(process)
+
+    def start(self):
+        import cv2
+
+        self.cv2 = cv2
+        self.width = self.height = None
+        for path in self.paths:
+            result = self.checked(
+                ["ffprobe", "-v", "error", "-show_streams", "-of", "json", str(path)],
+                30,
+            )
+            streams = json.loads(result)["streams"]
+            videos = [s for s in streams if s["codec_type"] == "video"]
+            if len(videos) != 1 or any(s["codec_type"] == "audio" for s in streams):
+                raise ValueError("idle must be silent video")
+            v = videos[0]
+            size = (int(v["width"]), int(v["height"]))
+            if min(size) < 64 or max(size) > 4096 or size[0] % 2 or size[1] % 2:
+                raise ValueError("unsupported idle dimensions")
+            if self.width is not None and size != (self.width, self.height):
+                raise ValueError("idle dimensions must match")
+            self.width, self.height = size
+            rate = v["avg_frame_rate"].split("/")
+            fps = float(rate[0]) / float(rate[1])
+            if abs(fps - 25) > 0.01:
+                raise ValueError("idle must be 25fps")
+            self.checked(
+                [
+                    "ffmpeg",
+                    "-v",
+                    "error",
+                    "-xerror",
+                    "-i",
+                    str(path),
+                    "-f",
+                    "null",
+                    "-",
+                ],
+                120,
+            )
+        with self.lifecycle:
+            if self.closed.is_set():
+                raise RuntimeError("output stopped")
+            ar, aw = os.pipe()
+            try:
+                self.proc = subprocess.Popen(
+                    [
+                        "ffmpeg",
+                        "-v",
+                        "error",
+                        "-nostdin",
+                        "-y",
+                        "-thread_queue_size",
+                        "32",
+                        "-probesize",
+                        "32",
+                        "-analyzeduration",
+                        "1",
+                        "-fpsprobesize",
+                        "0",
+                        "-f",
+                        "rawvideo",
+                        "-pix_fmt",
+                        "bgr24",
+                        "-s",
+                        f"{self.width}x{self.height}",
+                        "-r",
+                        "25",
+                        "-i",
+                        "pipe:0",
+                        "-thread_queue_size",
+                        "32",
+                        "-probesize",
+                        "32",
+                        "-analyzeduration",
+                        "1",
+                        "-f",
+                        "s16le",
+                        "-ar",
+                        "16000",
+                        "-ac",
+                        "1",
+                        "-i",
+                        f"pipe:{ar}",
+                        "-c:v",
+                        "libx264",
+                        "-preset",
+                        "veryfast",
+                        "-tune",
+                        "zerolatency",
+                        "-pix_fmt",
+                        "yuv420p",
+                        "-g",
+                        "50",
+                        "-c:a",
+                        "aac",
+                        "-ar",
+                        "44100",
+                        "-f",
+                        "flv",
+                        "-flush_packets",
+                        "1",
+                        self.rtmp,
+                    ],
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    pass_fds=(ar,),
+                )
+                self.audio = aw
+                self.video = self.proc.stdin.fileno()
+                os.set_blocking(aw, False)
+                os.set_blocking(self.video, False)
+            except BaseException:
+                os.close(aw)
+                raise
+            finally:
+                os.close(ar)
+
+    def alive(self):
+        return (
+            not self.closed.is_set()
+            and self.proc is not None
+            and self.proc.poll() is None
+            and self.failure is None
+        )
+
+    def _write(self, fd, data):
+        view = memoryview(data)
+        deadline = time.monotonic() + 5
+        while view:
+            if self.closed.is_set():
+                raise RuntimeError("output stopped")
+            if time.monotonic() > deadline or self.proc.poll() is not None:
+                raise RuntimeError("ffmpeg output stalled or exited")
+            if select.select([], [fd], [], 0.1)[1]:
+                try:
+                    view = view[os.write(fd, view) :]
+                except BlockingIOError:
+                    pass
+
+    def submit(self, pcm, frames, cancel):
+        import numpy as np
+
+        for i, jpeg in enumerate(frames):
+            image = self.cv2.imdecode(
+                np.frombuffer(jpeg, dtype=np.uint8), self.cv2.IMREAD_COLOR
+            )
+            if image is None or image.shape != (self.height, self.width, 3):
+                raise ValueError("rendered dimensions mismatch")
+            while not cancel.is_set() and not self.closed.is_set():
+                try:
+                    self.packets.put(
+                        (image, pcm[i * 1280 : (i + 1) * 1280]), timeout=0.1
+                    )
+                    break
+                except queue.Full:
+                    pass
+            else:
+                raise RuntimeError("render cancelled")
+
+    def drain(self, cancel):
+        while self.packets.unfinished_tasks:
+            if cancel.wait(0.02) or self.closed.is_set():
+                raise RuntimeError("output stopped")
+
+    def run(self, cancel, next_task):
+        def render_loop():
+            try:
+                while not cancel.wait(0.02):
+                    next_task()
+            except Exception as error:
+                self.failure = error
+                cancel.set()
+
+        renderer = threading.Thread(target=render_loop, daemon=True)
+        renderer.start()
+        index = 0
+        deadline = time.monotonic()
+        try:
+            while not cancel.is_set() and not self.closed.is_set():
+                speaking = False
+                try:
+                    image, audio = self.packets.get_nowait()
+                    speaking = True
+                except queue.Empty:
+                    if self.capture is None:
+                        self.capture = self.cv2.VideoCapture(str(self.paths[index]))
+                    ok, image = self.capture.read()
+                    if not ok:
+                        self.capture.release()
+                        self.capture = None
+                        index = (index + 1) % len(self.paths)
+                        continue
+                    audio = bytes(1280)
+                self._write(self.audio, audio)
+                self._write(self.video, image.tobytes())
+                deadline += 0.04
+                cancel.wait(max(0, deadline - time.monotonic()))
+                if speaking:
+                    self.packets.task_done()
+                if time.monotonic() - deadline > 1:
+                    deadline = time.monotonic()
+            if self.failure:
+                raise self.failure
+        finally:
+            self.stop()
+            renderer.join(timeout=95)
+
+    def relay(self, data):
+        terminate(self.relay_proc)
+        self.relay_proc = None
+        if not data.get("enabled"):
+            return
+        server = data.get("server", "")
+        key = data.get("streamKey", "")
+        if (
+            urlsplit(server).scheme not in ("rtmp", "rtmps")
+            or not key
+            or any(c in server + key for c in "\r\n")
+        ):
+            raise ValueError("invalid relay destination")
+        if not self.alive():
+            raise RuntimeError("output unavailable")
+        self.relay_proc = subprocess.Popen(
+            [
+                "ffmpeg",
+                "-v",
+                "error",
+                "-nostdin",
+                "-i",
+                self.rtmp,
+                "-c",
+                "copy",
+                "-f",
+                "flv",
+                server.rstrip("/") + "/" + key,
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+    def stop(self):
+        self.closed.set()
+        with self.lifecycle:
+            for child in list(self.children):
+                terminate(child)
+            terminate(self.relay_proc)
+            self.relay_proc = None
+        # Terminate before touching stdin: writes may still be in progress.
+        terminate(self.proc)
+        self.proc = None
+        if self.audio is not None:
+            try:
+                os.close(self.audio)
+            except OSError:
+                pass
+            self.audio = None
+        if self.capture is not None:
+            self.capture.release()
+            self.capture = None

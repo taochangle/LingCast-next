@@ -1,0 +1,14 @@
+# Model image Python3.10; worker remains Python3.12. Install torch CUDA wheels first.
+-r upstream-requirements.txt
+scipy==1.10.1
+requests==2.32.3
+gdown==5.2.0
+imageio==2.37.0
+imageio-ffmpeg==0.6.0
+omegaconf==2.3.0
+ffmpeg-python==0.2.0
+moviepy==1.0.3
+mmengine==0.10.7
+mmcv==2.0.1
+mmdet==3.1.0
+mmpose==1.1.0

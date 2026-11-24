@@ -1,0 +1,2 @@
+# Install from the separately pinned CosyVoice source checkout. See model-services.md.
+-r upstream-requirements.txt
