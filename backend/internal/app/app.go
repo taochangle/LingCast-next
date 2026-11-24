@@ -35,6 +35,7 @@ type App struct {
 	loc            *time.Location
 	cancel         context.CancelFunc
 	lastHost       time.Time
+	replies        *replyQueue
 	director       *hostDirector
 	hostTickActive bool
 	hostIndex      int

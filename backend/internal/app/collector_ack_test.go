@@ -45,7 +45,7 @@ func TestCollectorPartialFailuresAndDurableAcknowledgement(t *testing.T) {
 			failHTTP(w)
 			return
 		}
-		write(w, 200, object{"choices": []object{{"message": object{"content": "reply"}}}})
+		replyFixture(w, strings.Contains(string(raw), auditRules))
 	}))
 	defer llm.Close()
 	f.a.c.LLMURL = llm.URL
@@ -94,9 +94,15 @@ func TestCollectorPendingDuplicateRetries(t *testing.T) {
 	entered := make(chan struct{})
 	release := make(chan struct{})
 	llm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct{ Messages []struct{ Content string } }
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		if req.Messages[0].Content == auditRules {
+			replyFixture(w, true)
+			return
+		}
 		close(entered)
 		<-release
-		write(w, 200, object{"choices": []object{{"message": object{"content": "reply"}}}})
+		replyFixture(w, false)
 	}))
 	defer llm.Close()
 	f.a.c.LLMURL = llm.URL

@@ -203,7 +203,7 @@ func (a *App) CompanionTick(parent context.Context, sid string) (err error) {
 		return nil
 	}
 	a.mu.Lock()
-	if a.director != d || d.status.NextEligibleAt != nil && a.c.Clock().Before(*d.status.NextEligibleAt) {
+	if a.replies != nil && a.replies.sid == sid && a.replies.active || a.director != d || d.status.NextEligibleAt != nil && a.c.Clock().Before(*d.status.NextEligibleAt) {
 		a.mu.Unlock()
 		return nil
 	}
@@ -240,6 +240,11 @@ func (a *App) CompanionTick(parent context.Context, sid string) (err error) {
 	if e != nil {
 		return e
 	}
+	a.mu.Lock()
+	if a.replies != nil && a.replies.sid == sid {
+		in.ViewerTurns = append([]ViewerTurn(nil), a.replies.history...)
+	}
+	a.mu.Unlock()
 	// Set each pause once, measured from Worker completion even if polling is late.
 	completed := time.UnixMilli(int64(state.LastTaskCompletedAt * 1000))
 	if state.LastTaskCompletedAt > 0 {

@@ -3,7 +3,7 @@ package app
 import (
 	"context"
 	"database/sql"
-	"fmt"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -70,13 +70,13 @@ func (a *App) collect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	accepted := 0
+	arrivals := a.c.Clock()
+	waiting := map[string]<-chan bool{}
 	outcomes := map[string]string{}
 	for _, e := range b.Events {
 		outcomes[e.ID] = "retry"
 	}
 	for _, e := range b.Events {
-		a.mu.Unlock()
-		a.mu.Lock()
 		current := a.current()
 		if current == nil || current["id"] != s["id"] || current["status"] != "live" {
 			break
@@ -115,38 +115,29 @@ func (a *App) collect(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 		}
+		event := ViewerTurn{Kind: kind, Nickname: e.Nickname, Text: e.Text}
+		a.viewerArrivedLocked(s)
 		if text == "" && kind == "comment" {
-			avatar := a.get("avatars", str(s, "avatarId"))
-			a.mu.Unlock()
-			text, err = a.reply(context.Background(), str(avatar, "persona"), e.Nickname, e.Text)
-			a.mu.Lock()
-			current = a.current()
-			if current == nil || current["id"] != s["id"] || current["status"] != "live" {
-				_, _ = a.db.Exec("DELETE FROM events WHERE session_id=? AND id=? AND state='pending'", s["id"], e.ID)
-				break
-			}
+			waiting[e.ID] = a.queueReplyLocked(s, e.ID, event, arrivals)
+			continue
 		}
-		if err == nil && text != "" {
-			err = a.task(s, e.ID, kind, text)
+		if text != "" {
+			err = a.submitEventLocked(s, e.ID, "fixed", kind, text)
 		}
-		if err == nil {
-			var result sql.Result
-			result, err = a.db.Exec("UPDATE events SET state='done' WHERE session_id=? AND id=? AND state='pending'", s["id"], e.ID)
-			if err == nil {
-				var n int64
-				n, err = result.RowsAffected()
-				if n != 1 && err == nil {
-					err = fmt.Errorf("Lost event reservation")
-				}
-			}
-		}
-		if err != nil {
-			_, _ = a.db.Exec("DELETE FROM events WHERE session_id=? AND id=? AND state='pending'", s["id"], e.ID)
+		if !a.finishEventLocked(str(s, "id"), e.ID, err) {
 			continue
 		}
 		accepted++
 		outcomes[e.ID] = "processed"
 	}
+	a.mu.Unlock()
+	for id, ready := range waiting {
+		if <-ready {
+			accepted++
+			outcomes[id] = "processed"
+		}
+	}
+	a.mu.Lock()
 	processed, retry := []string{}, []string{}
 	seen := map[string]bool{}
 	for _, e := range b.Events {
@@ -161,6 +152,116 @@ func (a *App) collect(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	write(w, 200, object{"accepted": accepted, "processedIds": processed, "retryIds": retry, "serverTime": a.c.Clock().UTC().Format(time.RFC3339Nano)})
+}
+
+type replyJob struct {
+	id      string
+	event   ViewerTurn
+	arrived time.Time
+	result  chan bool
+}
+type replyQueue struct {
+	sid     string
+	active  bool
+	queue   []replyJob
+	history []ViewerTurn
+}
+
+func (a *App) viewerArrivedLocked(s object) {
+	if s["hostMode"] == "companion" {
+		a.directorLocked(s)
+		a.invalidateHostLocked(str(s, "id"))
+		a.director.lastViewer = a.c.Clock()
+	}
+}
+func (a *App) OnViewerTurn(sessionID string, event ViewerTurn) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if s := a.current(); str(s, "id") == sessionID && str(s, "status") == "live" {
+		a.viewerArrivedLocked(s)
+	}
+}
+func (a *App) finishEventLocked(sid, id string, err error) bool {
+	if err == nil {
+		result, e := a.db.Exec("UPDATE events SET state='done' WHERE session_id=? AND id=? AND state='pending'", sid, id)
+		if e == nil {
+			n, e := result.RowsAffected()
+			if e == nil && n == 1 {
+				return true
+			}
+		}
+	}
+	_, _ = a.db.Exec("DELETE FROM events WHERE session_id=? AND id=? AND state='pending'", sid, id)
+	return false
+}
+func (a *App) submitEventLocked(s object, id, source, kind, text string) error {
+	var existing string
+	err := a.db.QueryRow("SELECT source FROM host_tasks WHERE session_id=? AND task_id=?", s["id"], id).Scan(&existing)
+	if err == sql.ErrNoRows {
+		return a.registeredTask(s, id, source, kind, text)
+	}
+	if err != nil {
+		return err
+	}
+	if existing != source {
+		return errors.New("Event playback source mismatch")
+	}
+	return a.task(s, id, kind, text)
+}
+func (a *App) queueReplyLocked(s object, id string, event ViewerTurn, arrival time.Time) <-chan bool {
+	sid := str(s, "id")
+	if a.replies == nil || a.replies.sid != sid {
+		a.replies = &replyQueue{sid: sid}
+	}
+	q := a.replies
+	job := replyJob{id, event, arrival, make(chan bool, 1)}
+	if !q.active {
+		q.active = true
+		go a.runReplies(q, s, job)
+	} else if len(q.queue) < 20 {
+		q.queue = append(q.queue, job)
+	} else {
+		job.result <- a.finishEventLocked(sid, id, nil)
+	}
+	return job.result
+}
+func (a *App) runReplies(q *replyQueue, s object, job replyJob) {
+	for {
+		a.mu.Lock()
+		var err error
+		remember := false
+		if str(a.current(), "id") != q.sid {
+			err = errors.New("Session ended")
+		} else if a.c.Clock().Sub(job.arrived) <= 30*time.Second {
+			var in HostInput
+			in, err = a.LoadHostContext(str(s, "avatarId"), q.sid)
+			if err == nil {
+				in.ViewerTurns = append([]ViewerTurn(nil), q.history...)
+				a.mu.Unlock()
+				var decision ReplyDecision
+				decision, err = a.BuildInteractionReply(context.Background(), in, job.event)
+				a.mu.Lock()
+				if err == nil && decision.Action == "speak" && a.validHostInput(in) && a.c.Clock().Sub(job.arrived) <= 30*time.Second {
+					err = a.submitEventLocked(s, job.id, "interaction", "comment", decision.Text)
+					remember = err == nil
+				}
+			}
+		}
+		processed := a.finishEventLocked(q.sid, job.id, err)
+		if processed && remember {
+			q.history = appendViewerTurn(q.history, job.event)
+		}
+		job.result <- processed
+		if len(q.queue) == 0 {
+			q.active = false
+			a.mu.Unlock()
+			return
+		}
+		job = q.queue[0]
+		q.queue[0] = replyJob{}
+		q.queue = q.queue[1:]
+		a.mu.Unlock()
+	}
 }
 
 func (a *App) hostLoop() {

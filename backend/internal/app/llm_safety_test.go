@@ -82,11 +82,11 @@ func TestReplyUsesJSONViewerData(t *testing.T) {
 		if len(req.Messages) != 2 || !json.Valid([]byte(req.Messages[1].Content)) {
 			t.Error("raw concatenated input")
 		}
-		write(w, 200, object{"choices": []object{{"message": object{"content": "ok"}}}})
+		replyFixture(w, req.Messages[0].Content == auditRules)
 	}))
 	defer s.Close()
 	f.a.c.LLMURL = s.URL
-	if _, e := f.a.reply(context.Background(), "人设", "昵称", "评论"); e != nil {
+	if _, e := f.a.BuildInteractionReply(context.Background(), HostInput{Persona: "人设"}, ViewerTurn{"comment", "昵称", "评论"}); e != nil {
 		t.Fatal(e)
 	}
 }
@@ -127,6 +127,10 @@ func TestLegacyLongPersonaStillSpeaks(t *testing.T) {
 			t.Error(e)
 			return
 		}
+		if req.Messages[0].Content == auditRules {
+			replyFixture(w, true)
+			return
+		}
 		if len(req.Messages) != 2 || !strings.Contains(req.Messages[0].Content, prefix) || strings.Contains(req.Messages[0].Content, "历史尾部") {
 			t.Error("model-facing persona not bounded to 4096 Unicode characters")
 		}
@@ -134,7 +138,7 @@ func TestLegacyLongPersonaStillSpeaks(t *testing.T) {
 	}))
 	defer s.Close()
 	a.c.LLMURL = s.URL
-	if _, e := a.reply(context.Background(), original, "昵称", "你好"); e != nil {
+	if _, e := a.BuildInteractionReply(context.Background(), HostInput{Persona: original}, ViewerTurn{"comment", "昵称", "你好"}); e != nil {
 		t.Error(e)
 	}
 	if _, e := a.generateSpeech(context.Background(), input, "interaction"); e != nil {

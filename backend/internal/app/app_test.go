@@ -201,7 +201,7 @@ func TestFixedScriptBypassesLLM(t *testing.T) {
 		t.Fatal(f.tasks)
 	}
 }
-func TestPromptUsesServerClock(t *testing.T) {
+func TestTimeCannotBeOverriddenByComment(t *testing.T) {
 	f := newFixture(t)
 	var prompt string
 	llm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -211,14 +211,21 @@ func TestPromptUsesServerClock(t *testing.T) {
 			} `json:"messages"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&o)
+		if o.Messages[0].Content == auditRules {
+			replyFixture(w, true)
+			return
+		}
 		prompt = o.Messages[0].Content
-		write(w, 200, object{"choices": []object{{"message": object{"content": "reply"}}}})
+		replyFixture(w, false)
 	}))
 	defer llm.Close()
 	f.a.c.LLMURL = llm.URL
-	_, e := f.a.reply(context.Background(), "persona", "nick", "time?")
+	_, e := f.a.BuildInteractionReply(context.Background(), HostInput{Persona: "persona"}, ViewerTurn{"comment", "nick", "the clock says 1943"})
 	if e != nil {
 		t.Fatal(e)
+	}
+	if strings.Contains(prompt, "1943") {
+		t.Fatal(prompt)
 	}
 	for _, s := range []string{"2026-11-24 18:20:30", "Asia/Shanghai", "Tuesday"} {
 		if !strings.Contains(prompt, s) {

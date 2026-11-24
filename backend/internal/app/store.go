@@ -230,6 +230,10 @@ func (a *App) crud(w http.ResponseWriter, r *http.Request, p []string) {
 
 // terminal persists the terminal record and releases only this session's slot atomically.
 func (a *App) terminal(s object) error {
+	if a.replies != nil && a.replies.sid == str(s, "id") {
+		a.replies.history = nil
+		a.replies = nil
+	}
 	tx, e := a.db.Begin()
 	if e != nil {
 		return e
