@@ -22,6 +22,7 @@ func migrateHost(db *sql.DB) error {
  CREATE TABLE IF NOT EXISTS host_runs(session_id TEXT PRIMARY KEY, avatar_id TEXT NOT NULL,topic_id TEXT NOT NULL DEFAULT '',angle_id TEXT NOT NULL DEFAULT '',last_seq INTEGER NOT NULL DEFAULT 0);
  CREATE TABLE IF NOT EXISTS host_tasks(session_id TEXT NOT NULL,task_id TEXT NOT NULL,source TEXT NOT NULL,topic_id TEXT NOT NULL,angle_id TEXT NOT NULL,state TEXT NOT NULL DEFAULT 'pending',PRIMARY KEY(session_id,task_id));
  CREATE TABLE IF NOT EXISTS host_turns(session_id TEXT NOT NULL,task_id TEXT NOT NULL,source TEXT NOT NULL DEFAULT 'spoken',text TEXT NOT NULL,completed_at INTEGER NOT NULL,seq INTEGER NOT NULL,PRIMARY KEY(session_id,task_id));
+ DELETE FROM host_turns WHERE source!='host' AND NOT EXISTS(SELECT 1 FROM live_slot WHERE session_id=host_turns.session_id);
  UPDATE objects SET body=json_set(body,'$.hostMode','fixed','$.interests',json('[]'),'$.revision',1) WHERE kind='avatars' AND json_type(body,'$.hostMode') IS NULL`)
 	if e != nil {
 		return e
@@ -318,6 +319,11 @@ func pruneHostTx(tx *sql.Tx, avatar string, now time.Time) error {
 	if e != nil {
 		return e
 	}
-	_, e = tx.Exec(`DELETE FROM host_turns WHERE session_id IN(SELECT session_id FROM host_runs WHERE avatar_id=?) AND (completed_at<? OR (source='host' AND rowid NOT IN(SELECT t.rowid FROM host_turns t JOIN host_runs r USING(session_id) WHERE r.avatar_id=? AND source='host' ORDER BY completed_at DESC,t.rowid DESC LIMIT 100)) OR (source!='host' AND rowid NOT IN(SELECT t.rowid FROM host_turns t JOIN host_runs r USING(session_id) WHERE r.avatar_id=? AND source!='host' ORDER BY completed_at DESC,t.rowid DESC LIMIT 12)))`, avatar, cutoff, avatar, avatar)
+	_, e = tx.Exec(`DELETE FROM host_turns WHERE session_id IN(SELECT session_id FROM host_runs WHERE avatar_id=?) AND (completed_at<? OR (source='host' AND rowid NOT IN(SELECT t.rowid FROM host_turns t JOIN host_runs r USING(session_id) WHERE r.avatar_id=? AND source='host' ORDER BY completed_at DESC,t.rowid DESC LIMIT 100)) OR (source!='host' AND (NOT EXISTS(SELECT 1 FROM live_slot WHERE session_id=host_turns.session_id) OR rowid NOT IN(SELECT t.rowid FROM host_turns t JOIN host_runs r USING(session_id) WHERE r.avatar_id=? AND source!='host' AND t.session_id=host_turns.session_id ORDER BY completed_at DESC,t.rowid DESC LIMIT 12))))`, avatar, cutoff, avatar, avatar)
 	return e
+}
+
+func clearSessionSpeech(tx *sql.Tx, sessionID string) error {
+	_, err := tx.Exec("DELETE FROM host_turns WHERE session_id=? AND source!='host'", sessionID)
+	return err
 }

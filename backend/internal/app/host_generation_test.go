@@ -199,6 +199,9 @@ func TestBoundedHostHistory(t *testing.T) {
 		t.Fatal(e)
 	}
 	defer tx.Rollback()
+	if _, e = tx.Exec("INSERT INTO live_slot(slot,session_id) VALUES(1,'a1')"); e != nil {
+		t.Fatal(e)
+	}
 	for _, owner := range []string{"a1", "other"} {
 		if _, e = tx.Exec("INSERT INTO host_runs(session_id,avatar_id) VALUES(?,?)", owner, owner); e != nil {
 			t.Fatal(e)
@@ -264,4 +267,67 @@ func TestTopicBackoffAndStaleRevision(t *testing.T) {
 	if len(ts) != 0 || f.a.get("avatars", "a1")["persona"] != "新的人设" {
 		t.Fatal(ts)
 	}
+}
+
+func TestHostDraftHonorsSkip(t *testing.T) {
+	f := newFixture(t)
+	in, _ := f.a.LoadHostContext("a1", "")
+	in.CurrentTopic = &HostTopic{Angles: []HostAngle{{"x", "角度"}}}
+	in.CurrentAngleID = "x"
+	var calls atomic.Int32
+	modelFixture(t, f.a, func(system string) string {
+		if system == auditRules {
+			return `{"allow":true,"category":"safe"}`
+		}
+		if calls.Add(1) == 1 {
+			return `{"action":"skip"}`
+		}
+		b, _ := json.Marshal(object{"action": "speak", "text": strings.Repeat("假如我们一起散步看风景", 5)})
+		return string(b)
+	})
+	d, _ := f.a.BuildHostDraft(context.Background(), in)
+	if d.Text != "" || calls.Load() != 1 {
+		t.Fatal(d, calls.Load())
+	}
+}
+func TestSessionCloseErasesNonHostSpeech(t *testing.T) {
+	f := newFixture(t)
+	f.start()
+	old := str(f.a.current(), "id")
+	now := f.a.c.Clock()
+	record := func(sid, task string) {
+		t.Helper()
+		if e := f.a.RegisterPlayback(sid, task, "interaction", "", ""); e != nil {
+			t.Fatal(e)
+		}
+		if e := f.a.RecordPlayed(sid, TaskResult{Seq: 1, TaskID: task, State: "completed", Text: "当前场次互动", CompletedAt: now}); e != nil {
+			t.Fatal(e)
+		}
+	}
+	count := func(sid string, want int) {
+		t.Helper()
+		var n int
+		if e := f.a.db.QueryRow("SELECT COUNT(*) FROM host_turns WHERE session_id=? AND source!='host'", sid).Scan(&n); e != nil || n != want {
+			t.Fatal(n, e)
+		}
+	}
+	record(old, "old")
+	count(old, 1)
+	if r := f.req("POST", "/api/live/"+old+"/stop", "", "a"); r.Code != 200 {
+		t.Fatal(r.Body)
+	}
+	count(old, 0)
+	if r := f.start(); r.Code != 201 {
+		t.Fatal(r.Body)
+	}
+	fresh := str(f.a.current(), "id")
+	record(fresh, "fresh")
+	if _, e := f.a.db.Exec("INSERT INTO host_turns VALUES(?, 'legacy','interaction','旧互动',?,2)", old, now.Unix()); e != nil {
+		t.Fatal(e)
+	}
+	if e := f.a.pruneHostHistory(context.Background(), "a1"); e != nil {
+		t.Fatal(e)
+	}
+	count(old, 0)
+	count(fresh, 1)
 }

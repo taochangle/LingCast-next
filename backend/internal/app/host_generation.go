@@ -363,6 +363,9 @@ func (a *App) BuildHostDraft(ctx context.Context, in HostInput) (HostDraft, erro
 			}
 			return zero, e
 		}
+		if s == "" {
+			return zero, errGeneration
+		}
 		if !draftLength(s) {
 			continue
 		}

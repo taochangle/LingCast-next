@@ -245,6 +245,9 @@ func (a *App) terminal(s object) error {
 	if _, e = tx.Exec("DELETE FROM live_slot WHERE session_id=?", s["id"]); e != nil {
 		return e
 	}
+	if e = clearSessionSpeech(tx, str(s, "id")); e != nil {
+		return e
+	}
 	if _, e = tx.Exec("DELETE FROM events WHERE session_id=?", s["id"]); e != nil {
 		return e
 	}
