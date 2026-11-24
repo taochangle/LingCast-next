@@ -888,3 +888,33 @@ details[open] .chevron {
     transition: none !important;
   }
 }
+
+.nav-short-label {
+  display: none;
+}
+.operator-alert details {
+  font-size: 12px;
+  margin-top: 5px;
+}
+.operator-alert .actions {
+  margin-top: 7px;
+}
+.operator-alert .text {
+  margin-left: 0;
+}
+@media (max-width: 820px) {
+  nav button {
+    white-space: nowrap;
+  }
+  .nav-wide-label {
+    display: none;
+  }
+  .nav-short-label {
+    display: inline;
+  }
+}
+@media (max-width: 365px) {
+  nav button {
+    flex-direction: column;
+  }
+}

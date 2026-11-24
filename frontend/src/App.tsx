@@ -1,3 +1,4 @@
+import OperatorAlert, { operatorMessage } from "./components/OperatorAlert";
 import {
   Activity,
   ArrowRight,
@@ -270,12 +271,20 @@ export default function App() {
             <button
               key={key}
               disabled={busy}
+              aria-label={label}
               aria-current={page === key ? "page" : undefined}
               className={page === key ? "selected" : ""}
               onClick={() => setPage(key)}
             >
               <Icon />
-              {label}
+              {key === "avatars" ? (
+                <>
+                  <span className="nav-wide-label">{label}</span>
+                  <span className="nav-short-label">人物素材</span>
+                </>
+              ) : (
+                label
+              )}
             </button>
           ))}
         </nav>
@@ -312,12 +321,19 @@ export default function App() {
           </button>
         </header>
         {error && (
-          <div role="alert" className="alert">
-            {error}
-            <button className="text" onClick={() => setError("")}>
-              关闭
-            </button>
-          </div>
+          <OperatorAlert
+            detail={error}
+            busy={busy}
+            onClose={() => setError("")}
+            onSettings={
+              page === "settings"
+                ? undefined
+                : () => {
+                    setPage("settings");
+                    setError("");
+                  }
+            }
+          />
         )}
         {notice && (
           <div role="status" className="notice">
@@ -373,11 +389,19 @@ export default function App() {
                       </span>
                     )}
                   </div>
-                  {session?.error && (
-                    <p role="alert" className="alert">
-                      {session.error}
-                    </p>
-                  )}
+                  {session?.error &&
+                    (!error ||
+                      operatorMessage(session.error) !==
+                        operatorMessage(error)) && (
+                      <OperatorAlert
+                        detail={session.error}
+                        busy={busy}
+                        onSettings={() => {
+                          setPage("settings");
+                          setError("");
+                        }}
+                      />
+                    )}
                   {session && !running && session.status !== "stopped" && (
                     <button
                       disabled={busy}

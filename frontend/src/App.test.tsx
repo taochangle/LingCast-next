@@ -531,33 +531,89 @@ it("serializes slow background polls and accepts their results", async () => {
 
 it("shows relay failure and explicit disable after refreshing a live session", async () => {
   const original = globalThis.fetch;
-  vi.stubGlobal("fetch", vi.fn((url: string, options: any = {}) => {
-    if (url === "/api/live" && options.method === "GET")
-      return Promise.resolve({ok: true, status: 200, text: async () => JSON.stringify({
-        session: {id: "s", status: "live", avatarId: "a", lookId: "la", platform: "douyin", relayState: "failed"}
-      })});
-    return original(url, options);
-  }));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((url: string, options: any = {}) => {
+      if (url === "/api/live" && options.method === "GET")
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          text: async () =>
+            JSON.stringify({
+              session: {
+                id: "s",
+                status: "live",
+                avatarId: "a",
+                lookId: "la",
+                platform: "douyin",
+                relayState: "failed",
+              },
+            }),
+        });
+      return original(url, options);
+    }),
+  );
   render(<App />);
   await screen.findByText("转推进程已退出");
-  expect(screen.getByRole("button", {name: "结束直播"})).toBeEnabled();
+  expect(screen.getByRole("button", { name: "结束直播" })).toBeEnabled();
   fireEvent.click(screen.getByText("平台转推"));
-  fireEvent.click(screen.getByRole("button", {name: "确保停止转推"}));
-  await waitFor(() => expect(calls.some(c => c.url.endsWith("/relay") && c.body.enabled === false)).toBe(true));
+  fireEvent.click(screen.getByRole("button", { name: "确保停止转推" }));
+  await waitFor(() =>
+    expect(
+      calls.some((c) => c.url.endsWith("/relay") && c.body.enabled === false),
+    ).toBe(true),
+  );
 });
 
 it("displays the separate results of the worker and model connection check", async () => {
   const original = globalThis.fetch;
-  vi.stubGlobal("fetch", vi.fn((path, options) => {
-    if (path === "/api/settings/check") {
-      return Promise.resolve(new Response(JSON.stringify({ worker: false, llm: true })));
-    }
-    return original(path, options);
-  }));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((path, options) => {
+      if (path === "/api/settings/check") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ worker: false, llm: true })),
+        );
+      }
+      return original(path, options);
+    }),
+  );
   render(<App />);
   await screen.findByRole("option", { name: "小林" });
   fireEvent.click(screen.getByRole("button", { name: "服务设置" }));
   fireEvent.click(screen.getByRole("button", { name: "检查服务连接" }));
   expect(await screen.findByText("未就绪，请检查 Worker 服务")).toBeVisible();
   expect(screen.getByText("连接正常")).toBeVisible();
+});
+
+it("explains a failed startup and takes the operator to service checks", async () => {
+  const original = globalThis.fetch;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((path, options) => {
+      if (path === "/api/live" && options?.method === "POST") {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({ error: "Worker start failed or cancelled" }),
+            { status: 503 },
+          ),
+        );
+      }
+      return original(path, options);
+    }),
+  );
+  render(<App />);
+  fireEvent.change(await screen.findByLabelText("直播人物"), {
+    target: { value: "a" },
+  });
+  await screen.findByRole("option", { name: "春装" });
+  fireEvent.change(screen.getByLabelText("直播形象"), {
+    target: { value: "la" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "开始直播" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "直播未能启动。请到服务设置检查直播处理服务",
+  );
+  fireEvent.click(screen.getByRole("button", { name: "前往服务设置" }));
+  expect(screen.getByRole("button", { name: "检查服务连接" })).toBeVisible();
 });
