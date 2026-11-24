@@ -145,8 +145,10 @@ class SessionManager:
                 if (
                     self.current
                     and self.current["sessionId"] == sid
-                    and self.current["status"] != "stopped"
+                    and self.current["status"] not in ("stopped", "error")
                 ):
+                    # Inference may already have recorded the primary failure
+                    # and stopped output; its teardown error is secondary.
                     self.fail(error, sid)
 
     def process_next(self, expected=None):

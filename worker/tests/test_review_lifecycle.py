@@ -58,6 +58,63 @@ class LifecycleReviewTests(unittest.TestCase):
                 thread.join(2)
                 manager.close()
 
+    def test_inference_failure_is_not_overwritten_by_writer_cleanup_error(self):
+        entered = threading.Event()
+
+        class Capture:
+            def read(self):
+                return True, SimpleNamespace(tobytes=lambda: b"frame")
+
+            def release(self):
+                pass
+
+        class WaitingWriter(LiveOutput):
+            def start(self):
+                self.cv2 = SimpleNamespace(VideoCapture=lambda path: Capture())
+
+            def alive(self):
+                return not self.closed.is_set()
+
+            def _write(self, *args):
+                entered.set()
+                self.closed.wait(2)
+                raise RuntimeError("output stopped during cleanup")
+
+        class FailedInference(Models):
+            def render(self, *args):
+                raise ValueError("original inference failure")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = SessionManager(
+                tmp,
+                FailedInference(),
+                WaitingWriter,
+                fetch=lambda url, path, sha: Path(path).write_bytes(b"idle"),
+            )
+            manager.start(self.payload())
+            try:
+                self.assertTrue(entered.wait(1))
+                manager.enqueue(
+                    "s1",
+                    dict(
+                        id="fail",
+                        kind="manual",
+                        text="hello",
+                        createdAt=time.time(),
+                        expiresAt=time.time() + 30,
+                    ),
+                )
+                manager.thread.join(2)
+                self.assertFalse(manager.thread.is_alive())
+                self.assertEqual(manager.status()["status"], "error")
+                self.assertTrue(
+                    manager.status()["error"].startswith("ValueError:"),
+                    manager.status()["error"],
+                )
+                self.assertIsNone(manager.output.proc)
+            finally:
+                manager.close()
+
     def test_publication_stop_waits_for_retiring_generation_and_cleans_material(self):
         published = threading.Event()
         release_start = threading.Event()
