@@ -105,9 +105,11 @@ func (a *App) crud(w http.ResponseWriter, r *http.Request, p []string) {
 		fail(w, 405, "Method not allowed")
 		return
 	}
+	liveAvatarPatch := false
 	if s := a.current(); s != nil && !collection {
 		blocked := k == "avatars" && s["avatarId"] == o["id"] || k == "looks" && s["lookId"] == o["id"] || k == "idles" && s["lookId"] == o["lookId"]
-		if blocked {
+		liveAvatarPatch = k == "avatars" && blocked && r.Method == "PATCH"
+		if blocked && !liveAvatarPatch {
 			fail(w, 409, "Live resources are locked")
 			return
 		}
@@ -150,10 +152,24 @@ func (a *App) crud(w http.ResponseWriter, r *http.Request, p []string) {
 	if !decode(w, r, &in) {
 		return
 	}
+	if liveAvatarPatch {
+		for key := range in {
+			if key != "interests" && key != "persona" {
+				fail(w, 409, "Live resources are locked")
+				return
+			}
+		}
+	}
 	if o == nil {
 		o = object{"id": id()}
 		if parentKey != "" {
 			o[parentKey] = parentID
+		}
+	}
+	if k == "avatars" {
+		if err := applyHostConfig(o, in, collection); err != nil {
+			fail(w, 400, err.Error())
+			return
 		}
 	}
 	fields := map[string][]string{"avatars": {"name", "persona", "voiceId"}, "looks": {"name", "imageId", "defaultIdleId"}, "idles": {"mediaId"}, "scripts": {"kind", "text"}}

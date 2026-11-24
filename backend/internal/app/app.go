@@ -83,6 +83,10 @@ func New(c Config) (http.Handler, error) {
 	if e != nil {
 		return nil, e
 	}
+	if e = migrateHost(db); e != nil {
+		db.Close()
+		return nil, e
+	}
 	var stateColumn int
 	if e = db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('events') WHERE name='state'").Scan(&stateColumn); e != nil {
 		_ = db.Close()
