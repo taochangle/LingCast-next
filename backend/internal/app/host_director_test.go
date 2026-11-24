@@ -320,3 +320,65 @@ func TestRestartDoesNotReplayUnknown(t *testing.T) {
 		t.Fatal(in, e)
 	}
 }
+
+func TestLateFailuresRespectReadyCap(t *testing.T) {
+	f, sid := directorFixture(t)
+	for i := 4; i < 36; i++ {
+		k := fmt.Sprintf("quarantined%d", i)
+		if _, err := f.a.db.Exec(`INSERT INTO host_topics SELECT ?,avatar_id,?,title,angles,state,? FROM host_topics WHERE id='a'`, k, k, f.a.c.Clock().Unix()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	originals, err := f.a.listTopics("a1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, topic := range originals {
+		if err := f.a.RegisterPlayback(sid, "lost-"+topic.ID, "host", topic.ID, "one"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.a.ApplyTaskResults(sid, TaskResultsPage{Results: []TaskResult{{Seq: 3, TaskID: "other", State: "failed"}}, NextSeq: 3, Truncated: true}); err != nil {
+		t.Fatal(err)
+	}
+	modelFixture(t, f.a, func(sys string) string {
+		if sys == auditRules {
+			return approvedDirectorResponse(sys)
+		}
+		return topicFixture()
+	})
+	in, err := f.a.LoadHostContext("a1", sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	added, err := f.a.BuildTopics(context.Background(), in)
+	if err != nil || len(added) != 12 {
+		t.Fatal(len(added), err)
+	}
+	page := TaskResultsPage{NextSeq: 39}
+	for i, topic := range originals {
+		page.Results = append(page.Results, TaskResult{Seq: int64(i + 4), TaskID: "lost-" + topic.ID, State: "failed"})
+	}
+	for i := 0; i < 2; i++ {
+		if err := f.a.ApplyTaskResults(sid, page); err != nil {
+			t.Fatal(err)
+		}
+		var usable, failed int
+		if err := f.a.db.QueryRow(readyHostTopicCount, "a1").Scan(&usable); err != nil || usable != 36 {
+			t.Fatal("usable", usable, err)
+		}
+		if err := f.a.db.QueryRow("SELECT count(*) FROM host_tasks WHERE session_id=? AND state='failed'", sid).Scan(&failed); err != nil || failed != 36 {
+			t.Fatal("failure evidence", failed, err)
+		}
+		for _, topic := range added {
+			var state string
+			if err := f.a.db.QueryRow("SELECT state FROM host_topics WHERE id=?", topic.ID).Scan(&state); err != nil || state != "ready" {
+				t.Fatal(state, err)
+			}
+		}
+		in, err = f.a.LoadHostContext("a1", sid)
+		if err != nil || in.CurrentTopic != nil || len(in.SpokenTurns) != 0 {
+			t.Fatal(in, err)
+		}
+	}
+}

@@ -211,6 +211,7 @@ func (a *App) topicJobStatus(avatar string) object {
 const selectableHostTopic = `NOT EXISTS (
  SELECT 1 FROM host_tasks h WHERE h.topic_id=t.id AND h.state IN ('pending','unknown')
 )`
+const maxReadyHostTopics = 36
 const readyHostTopicCount = "SELECT COUNT(*) FROM host_topics t WHERE t.avatar_id=? AND t.state='ready' AND " + selectableHostTopic
 
 func (a *App) generateReserve(ctx context.Context, in HostInput, manual bool) ([]HostTopic, error) {
@@ -223,7 +224,7 @@ func (a *App) generateReserve(ctx context.Context, in HostInput, manual bool) ([
 	if e := a.db.QueryRowContext(ctx, readyHostTopicCount, in.AvatarID).Scan(&count); e != nil {
 		return nil, e
 	}
-	if count >= 36 || (!manual && count >= 4) {
+	if count >= maxReadyHostTopics || (!manual && count >= 4) {
 		return []HostTopic{}, nil
 	}
 	if e := a.pruneHostHistory(ctx, in.AvatarID); e != nil {
@@ -295,10 +296,10 @@ func (a *App) generateReserve(ctx context.Context, in HostInput, manual bool) ([
 		if e = tx.QueryRow(readyHostTopicCount, in.AvatarID).Scan(&count); e != nil {
 			return nil, e
 		}
-		if count >= 36 || (!manual && count >= 4) {
+		if count >= maxReadyHostTopics || (!manual && count >= 4) {
 			return []HostTopic{}, nil
 		}
-		topics = topics[:min(len(topics), 36-count)]
+		topics = topics[:min(len(topics), maxReadyHostTopics-count)]
 		for _, t := range topics {
 			b, _ := json.Marshal(t.Angles)
 			_, e = tx.Exec("INSERT INTO host_topics VALUES(?,?,?,?,?,?,?)", t.ID, t.AvatarID, t.Key, t.Title, string(b), t.State, t.CreatedAt.Unix())

@@ -266,7 +266,19 @@ func applyPlayback(tx *sql.Tx, sid string, r TaskResult) error {
 		return err
 	}
 	if r.State == "failed" {
-		return nil
+		if source != "host" {
+			return nil
+		}
+		// Releasing a pending or unknown task can put its unused topic back
+		// into a reserve that was replenished in the meantime. Retire only
+		// the returning topic if there is no slot, in the receipt transaction.
+		_, err = tx.Exec(`UPDATE host_topics AS recovered SET state='disabled'
+   WHERE recovered.id=? AND recovered.state='ready' AND EXISTS (
+    SELECT 1 FROM host_topics t WHERE t.avatar_id=recovered.avatar_id
+     AND t.state='ready' AND `+selectableHostTopic+`
+    LIMIT 1 OFFSET ?
+   )`, topic, maxReadyHostTopics)
+		return err
 	}
 	if strings.TrimSpace(r.Text) == "" || len(r.Text) > 10000 || r.CompletedAt.IsZero() {
 		return errors.New("Incomplete playback receipt")
