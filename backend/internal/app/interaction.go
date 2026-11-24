@@ -178,9 +178,7 @@ func (a *App) collect(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 		}
-		if state != "retry" {
-			a.viewerArrivedLocked(s)
-		}
+		a.viewerArrivedLocked(s, arrived)
 		if text == "" && kind == "comment" {
 			waiting[e.ID] = a.queueReplyLocked(s, e.ID, event, arrived)
 			continue
@@ -234,18 +232,21 @@ type replyQueue struct {
 	history []ViewerTurn
 }
 
-func (a *App) viewerArrivedLocked(s object) {
+func (a *App) viewerArrivedLocked(s object, arrived time.Time) {
 	if s["hostMode"] == "companion" {
 		a.directorLocked(s)
 		a.invalidateHostLocked(str(s, "id"))
-		a.director.lastViewer = a.c.Clock()
+		// A retry preempts drafts, but the original arrival determines quiet time.
+		if arrived.After(a.director.lastViewer) {
+			a.director.lastViewer = arrived
+		}
 	}
 }
 func (a *App) OnViewerTurn(sessionID string, event ViewerTurn) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if s := a.current(); str(s, "id") == sessionID && str(s, "status") == "live" {
-		a.viewerArrivedLocked(s)
+		a.viewerArrivedLocked(s, a.c.Clock())
 	}
 }
 func (a *App) finishEventLocked(sid, id string, err error) bool {

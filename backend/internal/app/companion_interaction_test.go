@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -357,5 +358,104 @@ func TestCollectorEventAgeMigration(t *testing.T) {
 				t.Fatal(state, arrival, err)
 			}
 		})
+	}
+}
+
+func TestRetryPreemptsApprovedHostDraft(t *testing.T) {
+	f := newFixture(t)
+	f.a.Close()
+	origin := f.a.c.Clock()
+	var seconds atomic.Int64
+	f.a.c.Clock = func() time.Time { return origin.Add(time.Duration(seconds.Load()) * time.Second) }
+	sid, token := sessionForReplies(t, f, "companion")
+	for _, key := range []string{"a", "b", "c", "d"} {
+		if _, e := f.a.db.Exec(`INSERT INTO host_topics VALUES(?,'a1',?,?,'[{"id":"one","text":"树影"}]','ready',1)`, key, key, key); e != nil {
+			t.Fatal(e)
+		}
+	}
+	if w := f.req("PATCH", "/api/live/"+sid+"/host", `{"enabled":true}`, "a"); w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	hostReady, hostRelease := make(chan struct{}), make(chan struct{})
+	replyReady, replyRelease := make(chan struct{}), make(chan struct{})
+	releaseHost := sync.OnceFunc(func() { close(hostRelease) })
+	releaseReply := sync.OnceFunc(func() { close(replyRelease) })
+	var checks, replyCalls atomic.Int64
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/status" && checks.Add(1) == 2 {
+			close(hostReady)
+			<-hostRelease
+		}
+		f.worker.Config.Handler.ServeHTTP(w, r)
+	}))
+	defer worker.Close()
+	defer releaseHost()
+	f.a.c.WorkerURL = worker.URL
+	model := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct{ Messages []struct{ Content string } }
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Error(err)
+			return
+		}
+		if req.Messages[0].Content == auditRules {
+			replyFixture(w, true)
+			return
+		}
+		var input struct{ Source string }
+		if err := json.Unmarshal([]byte(req.Messages[1].Content), &input); err != nil {
+			t.Error(err)
+			return
+		}
+		if input.Source == "interaction" {
+			if replyCalls.Add(1) == 1 {
+				failHTTP(w)
+				return
+			}
+			close(replyReady)
+			<-replyRelease
+			replyFixture(w, false)
+			return
+		}
+		write(w, 200, object{"choices": []object{{"message": object{"content": approvedDirectorResponse(req.Messages[0].Content)}}}})
+	}))
+	defer model.Close()
+	defer releaseReply()
+	f.a.c.LLMURL = model.URL
+	events := []object{{"id": "retrying", "kind": "comment", "text": "聊聊叶片"}}
+	seconds.Store(2)
+	if ack := collectTurns(t, f, sid, token, events); len(ack.Retry) != 1 {
+		t.Fatal(ack)
+	}
+	hostDone := make(chan error, 1)
+	go func() { hostDone <- f.a.CompanionTick(context.Background(), sid) }()
+	select {
+	case <-hostReady:
+	case <-time.After(2 * time.Second):
+		t.Fatal("approved host draft did not reach final worker check")
+	}
+	seconds.Store(12)
+	result := make(chan collectorAck, 1)
+	go func() { result <- collectTurns(t, f, sid, token, events) }()
+	select {
+	case <-replyReady:
+	case <-time.After(2 * time.Second):
+		t.Fatal("interaction retry did not enter generation")
+	}
+	releaseHost()
+	select {
+	case <-hostDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("host tick did not finish")
+	}
+	f.a.mu.Lock()
+	lastViewer := f.a.director.lastViewer
+	f.a.mu.Unlock()
+	f.mu.Lock()
+	queued := len(f.tasks)
+	f.mu.Unlock()
+	releaseReply()
+	ack := <-result
+	if queued != 0 || !lastViewer.Equal(origin.Add(2*time.Second)) || ack.Accepted != 1 || len(f.tasks) != 1 || f.tasks[0]["id"] != "retrying" {
+		t.Fatal(queued, lastViewer, ack, f.tasks)
 	}
 }
