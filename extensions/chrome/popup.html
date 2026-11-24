@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LingCast Next 互动采集</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <h1>直播互动采集</h1>
+  <form id="settings" autocomplete="off">
+    <label>服务器地址 <input type="url" id="server" placeholder="http://localhost:8080" required></label>
+    <label>直播平台
+      <select id="platform">
+        <option value="douyin">抖音</option>
+        <option value="xiaohongshu">小红书</option>
+      </select>
+    </label>
+    <label>直播会话 ID <input id="session-id" spellcheck="false" required></label>
+    <label>采集密钥 <input id="token" type="password" spellcheck="false" required></label>
+    <div class="actions">
+      <button type="submit" id="start">开始采集</button>
+      <button type="button" id="stop" disabled>停止采集</button>
+    </div>
+  </form>
+  <p id="status" role="status">采集未启动</p>
+  <p id="error" role="alert" hidden></p>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

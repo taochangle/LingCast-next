@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "LingCast Next 直播互动采集",
+  "description": "将当前抖音或小红书直播页的互动上报给你配置的 LingCast Next 会话。",
+  "version": "0.1.0",
+  "minimum_chrome_version": "120",
+  "permissions": ["activeTab", "scripting", "storage"],
+  "optional_host_permissions": ["http://*/*", "https://*/*"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "LingCast Next 互动采集"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  }
+}
