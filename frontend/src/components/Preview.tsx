@@ -1,6 +1,14 @@
+import MediaImage from "./MediaImage";
+import { MonitorPlay } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type mpegtsType from "mpegts.js";
-export default function Preview({ url }: { url: string }) {
+export default function Preview({
+  url,
+  imageId,
+}: {
+  url: string;
+  imageId: string;
+}) {
   const ref = useRef<HTMLVideoElement>(null);
   const [error, setError] = useState("");
   useEffect(() => {
@@ -33,15 +41,18 @@ export default function Preview({ url }: { url: string }) {
     };
   }, [url]);
   return (
-    <div className="preview">
+    <div className={url ? "preview playing" : "preview"}>
       {url ? (
         <video ref={ref} controls playsInline aria-label="直播画面预览" />
       ) : (
         <div className="preview-empty">
-          <div className="frame-mark" />
-          <h2>等待直播画面</h2>
-          <p>完成素材准备后开播，画面将在这里显示。</p>
+          <MonitorPlay aria-hidden="true" />
+          <strong>等待直播画面</strong>
+          <p>选好人物与形象，开始直播后在这里查看画面。</p>
         </div>
+      )}
+      {!url && imageId && (
+        <MediaImage id={imageId} alt="所选形象预览" className="poster" />
       )}
       {error && <p role="alert">{error}</p>}
     </div>

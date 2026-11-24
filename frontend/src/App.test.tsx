@@ -162,6 +162,7 @@ it("only sends relay credentials after explicit enable", async () => {
   });
   fireEvent.click(screen.getByRole("button", { name: "开始直播" }));
   await screen.findByRole("button", { name: "结束直播" });
+  fireEvent.click(screen.getByText("平台转推"));
   fireEvent.change(screen.getByLabelText("RTMP / RTMPS 服务地址"), {
     target: { value: "rtmps://example.invalid/live" },
   });
@@ -453,6 +454,7 @@ it("clears collector and relay state when polling discovers a different session"
   fireEvent.click(screen.getByRole("button", { name: "开始直播" }));
   await screen.findByRole("button", { name: "结束直播" });
   expect(screen.getByLabelText("本场采集令牌")).toHaveValue("token");
+  fireEvent.click(screen.getByText("平台转推"));
   fireEvent.change(screen.getByLabelText("RTMP / RTMPS 服务地址"), {
     target: { value: "rtmps://example.invalid/live" },
   });
@@ -539,6 +541,23 @@ it("shows relay failure and explicit disable after refreshing a live session", a
   render(<App />);
   await screen.findByText("转推进程已退出");
   expect(screen.getByRole("button", {name: "结束直播"})).toBeEnabled();
+  fireEvent.click(screen.getByText("平台转推"));
   fireEvent.click(screen.getByRole("button", {name: "确保停止转推"}));
   await waitFor(() => expect(calls.some(c => c.url.endsWith("/relay") && c.body.enabled === false)).toBe(true));
+});
+
+it("displays the separate results of the worker and model connection check", async () => {
+  const original = globalThis.fetch;
+  vi.stubGlobal("fetch", vi.fn((path, options) => {
+    if (path === "/api/settings/check") {
+      return Promise.resolve(new Response(JSON.stringify({ worker: false, llm: true })));
+    }
+    return original(path, options);
+  }));
+  render(<App />);
+  await screen.findByRole("option", { name: "小林" });
+  fireEvent.click(screen.getByRole("button", { name: "服务设置" }));
+  fireEvent.click(screen.getByRole("button", { name: "检查服务连接" }));
+  expect(await screen.findByText("未就绪，请检查 Worker 服务")).toBeVisible();
+  expect(screen.getByText("连接正常")).toBeVisible();
 });

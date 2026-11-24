@@ -1,4 +1,22 @@
 import {
+  Activity,
+  ArrowRight,
+  BookOpenText,
+  Cable,
+  ChevronDown,
+  Clapperboard,
+  ContactRound,
+  KeyRound,
+  LogOut,
+  MonitorPlay,
+  Plus,
+  Radio,
+  RefreshCw,
+  Send,
+  SlidersHorizontal,
+  UserRound,
+} from "lucide-react";
+import {
   useCallback,
   useEffect,
   useRef,
@@ -16,7 +34,71 @@ import type {
   Settings,
   Platform,
 } from "./types";
+import MediaImage from "./components/MediaImage";
 import Preview from "./components/Preview";
+const navigation = [
+  {
+    key: "studio",
+    label: "直播控制",
+    icon: MonitorPlay,
+    description: "选择本场人物与形象，预览画面并安排口播。",
+  },
+  {
+    key: "avatars",
+    label: "人物与素材",
+    icon: ContactRound,
+    description: "管理人物人设、音色，以及每个形象的图片和视频。",
+  },
+  {
+    key: "scripts",
+    label: "话术库",
+    icon: BookOpenText,
+    description: "按人物整理主持与互动稿件，固定稿将按原文播放。",
+  },
+  {
+    key: "settings",
+    label: "服务设置",
+    icon: SlidersHorizontal,
+    description: "查看部署配置，检查直播所需服务的连接状态。",
+  },
+];
+function Brand() {
+  return (
+    <div className="brand">
+      <span aria-hidden="true" className="mark">
+        <i />
+        <i />
+        <i />
+      </span>
+      LingCast
+    </div>
+  );
+}
+function Connection({
+  title,
+  status,
+  icon: Icon,
+  children,
+}: {
+  title: string;
+  status: string;
+  icon: typeof Cable;
+  children: ReactNode;
+}) {
+  return (
+    <details className="connection">
+      <summary>
+        <Icon />
+        <span>
+          <strong>{title}</strong>
+          <small>{status}</small>
+        </span>
+        <ChevronDown className="chevron" />
+      </summary>
+      <div className="connection-body">{children}</div>
+    </details>
+  );
+}
 const kinds: Record<ScriptKind, string> = {
   host: "自动主持",
   welcome: "欢迎观众",
@@ -54,7 +136,13 @@ export default function App() {
   const [relayServer, setRelayServer] = useState("");
   const [relayKey, setRelayKey] = useState("");
   const [settings, setSettings] = useState<Settings | null>(null);
+  const [checks, setChecks] = useState<{
+    worker: boolean;
+    llm: boolean;
+  } | null>(null);
   const running = active(session);
+  const displayedAvatar = running && session ? session.avatarId : avatarId;
+  const displayedLook = running && session ? session.lookId : lookId;
   // A read may finish after a command; only the current generation can update live state.
   const liveVersion = useRef(0);
   const liveReads = useRef(0);
@@ -65,8 +153,11 @@ export default function App() {
   const relayState = session?.relayState || "disabled";
   const relayOn = relayState === "running" || relayState === "launching";
   const relayDescription = {
-    disabled: "转推已关闭", launching: "正在启动转推", running: "转推进程运行中",
-    failed: "转推进程已退出", unknown: "转推状态暂时未知",
+    disabled: "转推已关闭",
+    launching: "正在启动转推",
+    running: "转推进程运行中",
+    failed: "转推进程已退出",
+    unknown: "转推状态暂时未知",
   }[relayState];
   const acceptSession = useCallback((next: Session | null) => {
     if (sessionIdRef.current !== (next?.id || "") || !active(next)) {
@@ -124,26 +215,28 @@ export default function App() {
   useEffect(() => {
     setLooks([]);
     setLookId("");
-    if (!avatarId) return;
+    if (!displayedAvatar) return;
     let cancelled = false;
-    api<Look[]>(`/avatars/${avatarId}/looks`)
+    api<Look[]>(`/avatars/${displayedAvatar}/looks`)
       .then((v) => {
-        if (!cancelled) setLooks(v.filter((l) => l.avatarId === avatarId));
+        if (!cancelled)
+          setLooks(v.filter((l) => l.avatarId === displayedAvatar));
       })
       .catch((e) => setError(e.message));
     return () => {
       cancelled = true;
     };
-  }, [avatarId]);
+  }, [displayedAvatar]);
   if (!connected)
     return (
       <div className="login">
         <div className="login-panel">
-          <div className="brand">
-            LingCast<span>直播工作台</span>
+          <Brand />
+          <div className="login-intro">
+            <KeyRound />
+            <h1>连接直播工作台</h1>
+            <p>使用部署时设置的管理员令牌登录。令牌仅保留在当前浏览器会话。</p>
           </div>
-          <h1>连接你的直播空间</h1>
-          <p>输入部署时设置的管理员令牌。令牌仅保留在当前浏览器会话。</p>
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -171,16 +264,9 @@ export default function App() {
   return (
     <div className="shell">
       <aside>
-        <div className="brand">
-          LingCast<span>直播工作台</span>
-        </div>
+        <Brand />
         <nav aria-label="主导航">
-          {[
-            ["studio", "直播控制"],
-            ["avatars", "人物与素材"],
-            ["scripts", "话术库"],
-            ["settings", "服务设置"],
-          ].map(([key, label]) => (
+          {navigation.map(({ key, label, icon: Icon }) => (
             <button
               key={key}
               disabled={busy}
@@ -188,13 +274,16 @@ export default function App() {
               className={page === key ? "selected" : ""}
               onClick={() => setPage(key)}
             >
+              <Icon />
               {label}
             </button>
           ))}
         </nav>
         <div className="sidebar-foot">
-          <span className={`dot ${running ? "on" : ""}`} />
-          {running ? "直播进行中" : "尚未开播"}
+          <div className="rail-state">
+            <span className={`dot ${running ? "on" : ""}`} />
+            {running ? "直播进行中" : "尚未开播"}
+          </div>
           <button
             className="text"
             disabled={busy}
@@ -206,6 +295,7 @@ export default function App() {
               setCollector("");
             }}
           >
+            <LogOut />
             断开管理连接
           </button>
         </div>
@@ -213,25 +303,11 @@ export default function App() {
       <main>
         <header>
           <div>
-            <h1>
-              {
-                (
-                  {
-                    studio: "直播控制",
-                    avatars: "人物与素材",
-                    scripts: "话术库",
-                    settings: "服务设置",
-                  } as Record<string, string>
-                )[page]
-              }
-            </h1>
-            <p>
-              {page === "studio"
-                ? "一场直播，一个形象。准备就绪，再与观众见面。"
-                : "为每一场直播做好准备。"}
-            </p>
+            <h1>{navigation.find((n) => n.key === page)?.label}</h1>
+            <p>{navigation.find((n) => n.key === page)?.description}</p>
           </div>
           <button onClick={() => act(refresh)} disabled={busy}>
+            <RefreshCw />
             刷新状态
           </button>
         </header>
@@ -251,59 +327,128 @@ export default function App() {
         {page === "studio" && (
           <>
             <div className="studio-grid">
-              <section className="screen">
-                <div className="section-head">
-                  <h2>节目预览</h2>
-                  <span className={`status ${running ? "live" : ""}`}>
-                    {session?.status || "未开播"}
-                  </span>
-                </div>
-                <Preview
-                  url={
-                    running && session
-                      ? `/api/live/${session.id}/preview?token=${encodeURIComponent(token)}`
-                      : ""
-                  }
-                />
-                <div className="screen-footer">
-                  {running && session ? (
-                    <>
-                      <span>
-                        {avatars.find((a) => a.id === session.avatarId)?.name ||
-                          "当前人物"}{" "}
-                        · {session.platform === "douyin" ? "抖音" : "小红书"}
-                      </span>
-                      <span>本场形象已锁定</span>
-                    </>
-                  ) : (
-                    <span>开播后提供实时画面预览</span>
-                  )}
-                </div>
-                {session?.error && (
-                  <p role="alert" className="alert">
-                    {session.error}
-                  </p>
-                )}
-                {session && !running && session.status !== "stopped" && (
-                  <button
-                    disabled={busy}
-                    onClick={() =>
-                      act(async () => {
-                        await api(`/live/${session.id}/stop`, "POST");
-                        await refresh();
-                      })
+              <div className="broadcast">
+                <section className="screen">
+                  <div className="section-head">
+                    <h2>直播预览</h2>
+                    <span className={`status ${running ? "live" : ""}`}>
+                      {(
+                        {
+                          live: "直播中",
+                          running: "直播中",
+                          starting: "启动中",
+                          stopping: "结束中",
+                          stopped: "已结束",
+                          failed: "直播异常",
+                          error: "直播异常",
+                        } as Record<string, string>
+                      )[session?.status || ""] ||
+                        (running ? "场次进行中" : "未开播")}
+                    </span>
+                  </div>
+                  <Preview
+                    imageId={looks.find((l) => l.id === lookId)?.imageId || ""}
+                    url={
+                      running && session
+                        ? `/api/live/${session.id}/preview?token=${encodeURIComponent(token)}`
+                        : ""
                     }
-                  >
-                    清理故障场次
-                  </button>
-                )}
-              </section>
-              <section className="panel">
+                  />
+                  <div className="screen-footer">
+                    {running && session ? (
+                      <>
+                        <span>
+                          {avatars.find((a) => a.id === session.avatarId)
+                            ?.name || "当前人物"}{" "}
+                          · {session.platform === "douyin" ? "抖音" : "小红书"}
+                        </span>
+                        <span>本场形象已锁定</span>
+                      </>
+                    ) : (
+                      <span>
+                        <MonitorPlay />{" "}
+                        {lookId
+                          ? "所选形象 · 尚未开播"
+                          : "开播后提供实时画面预览"}
+                      </span>
+                    )}
+                  </div>
+                  {session?.error && (
+                    <p role="alert" className="alert">
+                      {session.error}
+                    </p>
+                  )}
+                  {session && !running && session.status !== "stopped" && (
+                    <button
+                      disabled={busy}
+                      onClick={() =>
+                        act(async () => {
+                          await api(`/live/${session.id}/stop`, "POST");
+                          await refresh();
+                        })
+                      }
+                    >
+                      清理故障场次
+                    </button>
+                  )}
+                </section>
+                <section className="composer">
+                  <div className="section-head">
+                    <h2>手动口播</h2>
+                    <button
+                      disabled={!running || busy}
+                      onClick={() =>
+                        act(async () => {
+                          await api(`/live/${session!.id}/host`, "PATCH", {
+                            enabled: !session!.hostEnabled,
+                          });
+                          setSession({
+                            ...session!,
+                            hostEnabled: !session!.hostEnabled,
+                          });
+                        })
+                      }
+                    >
+                      {session?.hostEnabled ? "暂停主持" : "恢复主持"}
+                    </button>
+                  </div>
+                  <div className="speechbox">
+                    <Field label="手动口播内容">
+                      <textarea
+                        value={speech}
+                        onChange={(e) => setSpeech(e.target.value)}
+                        placeholder="输入这次要说的话…"
+                        rows={4}
+                      />
+                    </Field>
+                    <div className="speech-actions">
+                      <small>当前短段结束后优先播放原文</small>
+                      <button
+                        className="primary"
+                        disabled={!running || busy || !speech.trim()}
+                        onClick={() =>
+                          act(async () => {
+                            await api(`/live/${session!.id}/speak`, "POST", {
+                              text: speech,
+                            });
+                            setSpeech("");
+                            setNotice("口播已加入本场队列");
+                          })
+                        }
+                      >
+                        <Send />
+                        加入口播队列
+                      </button>
+                    </div>
+                  </div>
+                </section>
+              </div>
+              <section className="setup">
                 <h2>开播准备</h2>
                 <Field label="直播人物">
                   <select
                     aria-label="直播人物"
-                    value={avatarId}
+                    value={displayedAvatar}
                     disabled={running || busy}
                     onChange={(e) => setAvatarId(e.target.value)}
                   >
@@ -318,7 +463,7 @@ export default function App() {
                 <Field label="直播形象">
                   <select
                     aria-label="直播形象"
-                    value={lookId}
+                    value={displayedLook}
                     disabled={running || busy || !avatarId}
                     onChange={(e) => setLookId(e.target.value)}
                   >
@@ -333,7 +478,7 @@ export default function App() {
                 <Field label="直播平台">
                   <select
                     aria-label="直播平台"
-                    value={platform}
+                    value={running && session ? session.platform : platform}
                     disabled={running || busy}
                     onChange={(e) => setPlatform(e.target.value as Platform)}
                   >
@@ -341,8 +486,27 @@ export default function App() {
                     <option value="xiaohongshu">小红书</option>
                   </select>
                 </Field>
+                <button
+                  className="text"
+                  disabled={busy}
+                  onClick={() => setPage("avatars")}
+                >
+                  管理人物与素材 <ArrowRight />
+                </button>
+                <div className="readiness">
+                  <span>默认口型底片</span>
+                  <strong>
+                    {running
+                      ? "本场已固定"
+                      : looks.find((l) => l.id === lookId)?.defaultIdleId
+                        ? "已指定"
+                        : lookId
+                          ? "待添加"
+                          : "待选择形象"}
+                  </strong>
+                </div>
                 <p className="hint">
-                  形象需包含已验证的静音 idle 视频，并指定默认口型底片。
+                  给形象指定一条静音待机视频，作为生成口型的默认底片。
                 </p>
                 {running ? (
                   <button
@@ -384,55 +548,12 @@ export default function App() {
                 )}
               </section>
             </div>
-            <div className="two-col">
-              <section className="panel">
-                <div className="section-head">
-                  <h2>口播与主持</h2>
-                  <button
-                    disabled={!running || busy}
-                    onClick={() =>
-                      act(async () => {
-                        await api(`/live/${session!.id}/host`, "PATCH", {
-                          enabled: !session!.hostEnabled,
-                        });
-                        setSession({
-                          ...session!,
-                          hostEnabled: !session!.hostEnabled,
-                        });
-                      })
-                    }
-                  >
-                    {session?.hostEnabled ? "暂停主持" : "恢复主持"}
-                  </button>
-                </div>
-                <p className="hint">
-                  手动稿按原文播放，在当前短段结束后优先安排。
-                </p>
-                <Field label="手动口播内容">
-                  <textarea
-                    value={speech}
-                    onChange={(e) => setSpeech(e.target.value)}
-                    placeholder="输入这次要说的话…"
-                    rows={4}
-                  />
-                </Field>
-                <button
-                  disabled={!running || busy || !speech.trim()}
-                  onClick={() =>
-                    act(async () => {
-                      await api(`/live/${session!.id}/speak`, "POST", {
-                        text: speech,
-                      });
-                      setSpeech("");
-                      setNotice("口播已加入本场队列");
-                    })
-                  }
-                >
-                  加入口播队列
-                </button>
-              </section>
-              <section className="panel">
-                <h2>观众事件采集</h2>
+            <div className="connections">
+              <Connection
+                title="观众事件采集"
+                icon={Radio}
+                status={running ? "本场采集凭据" : "开播后获取凭据"}
+              >
                 <p className="hint">
                   在 Chrome
                   采集插件中填写以下信息，再主动开始采集。令牌仅在创建或轮换时显示。
@@ -489,69 +610,74 @@ export default function App() {
                     复制令牌
                   </button>
                 </div>
-              </section>
+              </Connection>
+              <Connection
+                title="平台转推"
+                icon={Cable}
+                status={relayDescription}
+              >
+                <p className="hint">
+                  选择平台不会开启外部推流。请填写平台提供的地址与密钥，再显式启用。
+                </p>
+                <div className="relay-fields">
+                  <Field label="RTMP / RTMPS 服务地址">
+                    <input
+                      value={relayServer}
+                      placeholder="rtmps://…"
+                      onChange={(e) => setRelayServer(e.target.value)}
+                    />
+                  </Field>
+                  <Field label="推流密钥">
+                    <input
+                      type="password"
+                      autoComplete="off"
+                      value={relayKey}
+                      onChange={(e) => setRelayKey(e.target.value)}
+                    />
+                  </Field>
+                  <button
+                    disabled={
+                      !running ||
+                      busy ||
+                      (!relayOn &&
+                        (!/^rtmps?:\/\//.test(relayServer) || !relayKey))
+                    }
+                    onClick={() =>
+                      act(async () => {
+                        await api(`/live/${session!.id}/relay`, "PUT", {
+                          enabled: !relayOn,
+                          server: relayServer,
+                          streamKey: relayKey,
+                        });
+                        if (sessionIdRef.current !== session!.id) return;
+                        setSession({
+                          ...session!,
+                          relayState: relayOn ? "disabled" : "launching",
+                        });
+                      })
+                    }
+                  >
+                    {relayOn ? "停止转推" : "启用转推"}
+                  </button>
+                  <button
+                    disabled={!running || busy}
+                    onClick={() =>
+                      act(async () => {
+                        await api(`/live/${session!.id}/relay`, "PUT", {
+                          enabled: false,
+                          server: "",
+                          streamKey: "",
+                        });
+                        if (sessionIdRef.current === session!.id)
+                          setSession({ ...session!, relayState: "disabled" });
+                      })
+                    }
+                  >
+                    确保停止转推
+                  </button>
+                </div>
+              </Connection>
             </div>
-            <section className="panel relay">
-              <h2>平台转推</h2>
-              <p role="status">{relayDescription}</p>
-              <p className="hint">
-                选择平台不会开启外部推流。请填写平台提供的地址与密钥，再显式启用。
-              </p>
-              <div className="relay-fields">
-                <Field label="RTMP / RTMPS 服务地址">
-                  <input
-                    value={relayServer}
-                    placeholder="rtmps://…"
-                    onChange={(e) => setRelayServer(e.target.value)}
-                  />
-                </Field>
-                <Field label="推流密钥">
-                  <input
-                    type="password"
-                    autoComplete="off"
-                    value={relayKey}
-                    onChange={(e) => setRelayKey(e.target.value)}
-                  />
-                </Field>
-                <button
-                  disabled={
-                    !running ||
-                    busy ||
-                    (!relayOn &&
-                      (!/^rtmps?:\/\//.test(relayServer) || !relayKey))
-                  }
-                  onClick={() =>
-                    act(async () => {
-                      await api(`/live/${session!.id}/relay`, "PUT", {
-                        enabled: !relayOn,
-                        server: relayServer,
-                        streamKey: relayKey,
-                      });
-                      if (sessionIdRef.current !== session!.id) return;
-                      setSession({ ...session!, relayState: relayOn ? "disabled" : "launching" });
-                    })
-                  }
-                >
-                  {relayOn ? "停止转推" : "启用转推"}
-                </button>
-                <button
-                  disabled={!running || busy}
-                  onClick={() =>
-                    act(async () => {
-                      await api(`/live/${session!.id}/relay`, "PUT", {
-                        enabled: false,
-                        server: "",
-                        streamKey: "",
-                      });
-                      if (sessionIdRef.current === session!.id)
-                        setSession({ ...session!, relayState: "disabled" });
-                    })
-                  }
-                >
-                  确保停止转推
-                </button>
-              </div>
-            </section>
           </>
         )}
         {page === "avatars" && (
@@ -568,7 +694,10 @@ export default function App() {
         )}
         {page === "settings" && (
           <section className="panel settings">
-            <h2>服务连接</h2>
+            <h2>
+              <Activity />
+              服务连接
+            </h2>
             <p className="hint">
               配置由部署环境提供，此处仅查看安全信息并检查连接。
             </p>
@@ -584,11 +713,11 @@ export default function App() {
               <button
                 onClick={() =>
                   act(async () => {
-                    const result = await api<unknown>(
+                    const result = await api<{ worker: boolean; llm: boolean }>(
                       "/settings/check",
                       "POST",
                     );
-                    setNotice(`连接检查结果：${JSON.stringify(result)}`);
+                    setChecks(result);
                   })
                 }
                 disabled={busy}
@@ -596,19 +725,40 @@ export default function App() {
                 检查服务连接
               </button>
             </div>
+            {checks && (
+              <section className="results" aria-live="polite">
+                <h3>连接检查结果</h3>
+                <dl className="details">
+                  <dt>直播处理服务</dt>
+                  <dd>
+                    {checks.worker ? "已就绪" : "未就绪，请检查 Worker 服务"}
+                  </dd>
+                  <dt>语言模型服务</dt>
+                  <dd>
+                    {checks.llm ? "连接正常" : "连接失败，请检查模型地址与凭据"}
+                  </dd>
+                </dl>
+              </section>
+            )}
             {settings && (
               <dl className="details">
                 <dt>业务时区</dt>
                 <dd>{settings.timezone}</dd>
-                <dt>Worker</dt>
+                <dt>处理服务地址</dt>
                 <dd>{settings.workerUrl || "未配置"}</dd>
-                <dt>LLM</dt>
+                <dt>模型服务地址</dt>
                 <dd>{settings.llmUrl || "未配置"}</dd>
                 <dt>语言模型</dt>
                 <dd>{settings.llmModel || "未配置"}</dd>
                 {Object.entries(settings.configured || {}).map(([k, v]) => (
                   <div className="config-line" key={k}>
-                    <dt>{k}</dt>
+                    <dt>
+                      {{
+                        worker: "处理服务凭据",
+                        llm: "模型服务凭据",
+                        media: "素材访问凭据",
+                      }[k] || k}
+                    </dt>
                     <dd>{v ? "已配置" : "未配置"}</dd>
                   </div>
                 ))}
@@ -616,7 +766,6 @@ export default function App() {
             )}
           </section>
         )}
-        <footer>LingCast Next · 素材由运营者提供 · 单场直播工作空间</footer>
       </main>
     </div>
   );
@@ -746,7 +895,10 @@ function AvatarManager({
       <section className="panel resource-list">
         <div className="section-head">
           <h2>人物</h2>
-          <button onClick={() => choose()}>新建人物</button>
+          <button onClick={() => choose()}>
+            <Plus />
+            新建人物
+          </button>
         </div>
         {avatars.length ? (
           avatars.map((a) => (
@@ -755,8 +907,11 @@ function AvatarManager({
               key={a.id}
               onClick={() => choose(a)}
             >
-              <strong>{a.name}</strong>
-              <small>音色 {a.voiceId}</small>
+              <UserRound />
+              <span>
+                <strong>{a.name}</strong>
+                <small>音色 {a.voiceId}</small>
+              </span>
             </button>
           ))
         ) : (
@@ -836,11 +991,11 @@ function AvatarManager({
         </section>
         {id && (
           <section className="panel">
-            <h2>形象与 idle 素材</h2>
+            <h2>形象与视频素材</h2>
             <p className="hint">
               上传形象图，再添加静音视频。视频应与人物外观一致，服务端会检查格式与完整解码。
             </p>
-            <div className="actions wrap">
+            <div className="look-gallery">
               {looks.map((l) => (
                 <button
                   key={l.id}
@@ -852,6 +1007,10 @@ function AvatarManager({
                     setImageUrl("");
                   }}
                 >
+                  <span className="thumb">
+                    <Clapperboard />
+                    <MediaImage id={l.imageId} alt="" />
+                  </span>
                   {l.name}
                 </button>
               ))}
@@ -944,16 +1103,16 @@ function AvatarManager({
             </form>
             {look && (
               <div className="idle-list">
-                <h3>静音 idle 视频</h3>
+                <h3>静音待机视频</h3>
                 {idles.length === 0 && (
                   <p className="empty">
-                    还没有 idle 视频。上传后选择一条作为默认口型底片。
+                    还没有待机视频。上传后选择一条作为默认口型底片。
                   </p>
                 )}
                 {idles.map((i, index) => (
                   <div className="idle-row" key={i.id}>
                     <span>
-                      idle {index + 1}
+                      待机视频 {index + 1}
                       <small>{i.mediaId}</small>
                     </span>
                     <button
@@ -978,7 +1137,7 @@ function AvatarManager({
                       className="danger"
                       disabled={busy || id === lockedAvatar}
                       onClick={() => {
-                        if (confirm("删除这条 idle？"))
+                        if (confirm("删除这条待机视频？"))
                           act(async () => {
                             await api(`/idles/${i.id}`, "DELETE");
                             await loadIdles();
@@ -1062,9 +1221,9 @@ function ScriptManager({
     };
   }, [avatar]);
   return (
-    <fieldset disabled={busy} className="two-col manager-fields">
+    <fieldset disabled={busy} className="script-library manager-fields">
       <section className="panel">
-        <h2>编写话术</h2>
+        <h2>已保存话术</h2>
         <Field label="所属人物">
           <select value={avatar} onChange={(e) => setAvatar(e.target.value)}>
             <option value="">选择人物</option>
@@ -1075,6 +1234,59 @@ function ScriptManager({
             ))}
           </select>
         </Field>
+
+        {!avatar ? (
+          <p className="empty">选择人物，查看独立话术库。</p>
+        ) : scripts.length === 0 ? (
+          <p className="empty">
+            话术库为空，人物将保持待机。添加主持稿后可按序循环。
+          </p>
+        ) : (
+          Object.entries(kinds)
+            .filter(([k]) => scripts.some((s) => s.kind === k))
+            .map(([k, v]) => (
+              <div className="script-group" key={k}>
+                <h3>{v}</h3>
+                {scripts
+                  .filter((s) => s.kind === k)
+                  .map((s) => (
+                    <article className="script" key={s.id}>
+                      <p>{s.text}</p>
+                      <div className="actions">
+                        <button
+                          onClick={() => {
+                            setEdit(s.id);
+                            setKind(s.kind);
+                            setText(s.text);
+                          }}
+                        >
+                          编辑
+                        </button>
+                        <button
+                          className="danger"
+                          disabled={busy}
+                          onClick={() =>
+                            act(async () => {
+                              await api(`/scripts/${s.id}`, "DELETE");
+                              if (edit === s.id) {
+                                setEdit("");
+                                setText("");
+                              }
+                              await load();
+                            })
+                          }
+                        >
+                          删除
+                        </button>
+                      </div>
+                    </article>
+                  ))}
+              </div>
+            ))
+        )}
+      </section>
+      <section className="panel">
+        <h2>{edit ? "编辑话术" : "编写话术"}</h2>
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -1130,56 +1342,6 @@ function ScriptManager({
             )}
           </div>
         </form>
-      </section>
-      <section className="panel">
-        <h2>已保存话术</h2>
-        {!avatar ? (
-          <p className="empty">选择人物，查看独立话术库。</p>
-        ) : scripts.length === 0 ? (
-          <p className="empty">
-            话术库为空，系统会保持 idle。添加主持稿后可按序循环。
-          </p>
-        ) : (
-          Object.entries(kinds).map(([k, v]) => (
-            <div className="script-group" key={k}>
-              <h3>{v}</h3>
-              {scripts
-                .filter((s) => s.kind === k)
-                .map((s) => (
-                  <article className="script" key={s.id}>
-                    <p>{s.text}</p>
-                    <div className="actions">
-                      <button
-                        onClick={() => {
-                          setEdit(s.id);
-                          setKind(s.kind);
-                          setText(s.text);
-                        }}
-                      >
-                        编辑
-                      </button>
-                      <button
-                        className="danger"
-                        disabled={busy}
-                        onClick={() =>
-                          act(async () => {
-                            await api(`/scripts/${s.id}`, "DELETE");
-                            if (edit === s.id) {
-                              setEdit("");
-                              setText("");
-                            }
-                            await load();
-                          })
-                        }
-                      >
-                        删除
-                      </button>
-                    </div>
-                  </article>
-                ))}
-            </div>
-          ))
-        )}
       </section>
     </fieldset>
   );
