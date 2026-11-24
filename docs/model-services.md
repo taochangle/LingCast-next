@@ -4,6 +4,8 @@ These services execute real resident inference; failed imports, missing referenc
 
 ## Processes and environment
 
+Set `TTS_GPU_ID` and `LIPSYNC_GPU_ID` in `.env` to the host NVIDIA GPU index or UUID for each service (both default to `0`). Compose exposes only the selected device to each model container, where it is addressed as `cuda:0`. For example, set both to `0` to share host GPU 0, or use `0` and `1` to place the services on separate GPUs. Worker and Go do not request a GPU.
+
 Run from repository root (copy `worker/` and `services/` into `/app`, `WORKDIR /app`):
 
 | Process | Command | Required settings | Default port |

@@ -36,7 +36,13 @@ services:
     build:
       context: .
       dockerfile: deploy/tts.Dockerfile
-    gpus: all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${TTS_GPU_ID:-0}"]
+              capabilities: [gpu]
     ports:
       - "${TTS_BIND_ADDRESS:-127.0.0.1}:${TTS_HOST_PORT:-8091}:8091"
     environment:
@@ -61,7 +67,13 @@ services:
     build:
       context: .
       dockerfile: deploy/lipsync.Dockerfile
-    gpus: all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${LIPSYNC_GPU_ID:-0}"]
+              capabilities: [gpu]
     ports:
       - "${LIPSYNC_BIND_ADDRESS:-127.0.0.1}:${LIPSYNC_HOST_PORT:-8092}:8092"
     environment:
