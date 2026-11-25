@@ -9,6 +9,7 @@
 !worker/**
 !deploy/
 !deploy/configure-apt.sh
+!deploy/patch-cosyvoice-offline.py
 !vendor/
 !vendor/sources/
 !vendor/sources/**

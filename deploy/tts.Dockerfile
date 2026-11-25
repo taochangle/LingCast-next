@@ -28,6 +28,8 @@ RUN pip install --no-cache-dir --no-build-isolation pyworld==0.3.4 \
     && pip install --no-cache-dir onnxruntime-gpu==1.18.0 --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/onnxruntime-cuda-12/pypi/simple/ \
     && pip install --no-cache-dir -r /tmp/tts/requirements.txt \
     && pip check
+COPY deploy/patch-cosyvoice-offline.py /tmp/patch-cosyvoice-offline.py
+RUN python /tmp/patch-cosyvoice-offline.py /opt/CosyVoice/cosyvoice/cli/frontend.py
 WORKDIR /app
 COPY services/common.py ./services/common.py
 COPY services/tts ./services/tts
