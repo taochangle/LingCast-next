@@ -107,8 +107,8 @@ func (a *App) selectHostAngle(in *HostInput, skipped map[hostAngleKey]struct{}) 
 		currentID = in.CurrentTopic.ID
 	}
 	ts, e := a.queryTopics(in.AvatarID,
-		"AND (state='ready' OR (state='active' AND id=?)) AND "+selectableHostTopic+
-			" ORDER BY (state='active') DESC,created_at DESC,rowid DESC", currentID)
+		"AND state IN ('ready','active') AND "+selectableHostTopic+
+			" ORDER BY (id=?) DESC,(state='active') DESC,created_at DESC,rowid DESC", currentID)
 	if e != nil {
 		return e
 	}

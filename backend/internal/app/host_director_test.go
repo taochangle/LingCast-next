@@ -589,3 +589,26 @@ func TestCompanionSkipAdvancesWithoutRecordingPlayback(t *testing.T) {
 		t.Fatalf("queued %s/%s after skipping d/one", topic, angle)
 	}
 }
+
+func TestNewSessionCanResumeUnspokenAnglesFromAnActiveTopic(t *testing.T) {
+	f, sid := directorFixture(t)
+	if _, err := f.a.db.Exec("UPDATE host_topics SET state='done' WHERE id!='a'"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.a.db.Exec("UPDATE host_topics SET state='active' WHERE id='a'"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.a.db.Exec("INSERT INTO host_recent_keys VALUES('a1','a/开头',?)", f.a.c.Clock().Unix()); err != nil {
+		t.Fatal(err)
+	}
+	in, err := f.a.LoadHostContext("a1", sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.a.selectHostAngle(&in, nil); err != nil {
+		t.Fatal(err)
+	}
+	if in.CurrentTopic.ID != "a" || in.CurrentAngleID != "two" {
+		t.Fatal(in.CurrentTopic, in.CurrentAngleID)
+	}
+}
