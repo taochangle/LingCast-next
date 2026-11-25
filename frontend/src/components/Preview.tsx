@@ -23,7 +23,14 @@ export default function Preview({
           setError("当前浏览器不支持 FLV 预览，请使用桌面 Chrome 或 Edge。");
           return;
         }
-        player = mpegts.createPlayer({ type: "flv", isLive: true, url });
+        player = mpegts.createPlayer(
+          { type: "flv", isLive: true, url },
+          {
+            liveBufferLatencyChasing: true,
+            liveBufferLatencyMaxLatency: 3,
+            liveBufferLatencyMinRemain: 1,
+          },
+        );
         player.attachMediaElement(ref.current);
         player.on(mpegts.Events.ERROR, () =>
           setError("预览连接中断，请检查服务状态或重新连接。"),
