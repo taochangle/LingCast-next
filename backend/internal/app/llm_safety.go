@@ -30,7 +30,11 @@ func (a *App) chatContent(ctx context.Context, system string, data any) (string,
 			}
 		}
 	}
-	err = a.remote(ctx, a.c.LLMURL, a.c.LLMToken, "POST", "/chat/completions", object{"model": a.c.LLMModel, "messages": []object{{"role": "system", "content": system}, {"role": "user", "content": string(raw)}}}, &out)
+	request := object{"model": a.c.LLMModel, "messages": []object{{"role": "system", "content": system}, {"role": "user", "content": string(raw)}}}
+	if a.c.LLMDisableThinking {
+		request["chat_template_kwargs"] = object{"enable_thinking": false}
+	}
+	err = a.remote(ctx, a.c.LLMURL, a.c.LLMToken, "POST", "/chat/completions", request, &out)
 	if err != nil {
 		return "", err
 	}

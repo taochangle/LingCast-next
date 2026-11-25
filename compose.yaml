@@ -22,6 +22,7 @@ services:
       LLM_URL: ${LLM_URL:-}
       LLM_TOKEN: ${LLM_TOKEN:?Set LLM_TOKEN (use a generated unused token if LLM is disabled)}
       LLM_MODEL: ${LLM_MODEL:-}
+      LLM_DISABLE_THINKING: ${LLM_DISABLE_THINKING:-false}
       TIMEZONE: ${TIMEZONE:-Asia/Shanghai}
       WORKER_START_TIMEOUT: ${WORKER_START_TIMEOUT:-12m}
       DATA_DIR: /data

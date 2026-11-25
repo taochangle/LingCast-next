@@ -20,6 +20,7 @@ import (
 )
 
 type Config struct {
+	LLMDisableThinking                                                                                                                          bool
 	WorkerStartTimeout                                                                                                                          time.Duration
 	DataDir, AdminToken, MediaToken, WorkerURL, WorkerToken, LLMURL, LLMToken, LLMModel, Timezone, PublicBaseURL, WorkerMediaBaseURL, StaticDir string
 	HTTPClient                                                                                                                                  *http.Client
