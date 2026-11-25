@@ -10,6 +10,8 @@ services:
         APK_MIRROR: ${APK_MIRROR-https://mirrors.tuna.tsinghua.edu.cn/alpine}
     ports:
       - "${APP_BIND_ADDRESS:-127.0.0.1}:${APP_HOST_PORT:-8080}:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       ADMIN_TOKEN: ${ADMIN_TOKEN:?Set ADMIN_TOKEN}
       MEDIA_TOKEN: ${MEDIA_TOKEN:?Set MEDIA_TOKEN}
