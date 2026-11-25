@@ -272,7 +272,7 @@ func TestDirectorRefillsQuarantinedReserve(t *testing.T) {
 				t.Fatal(e)
 			}
 			modelFixture(t, f.a, func(system string) string {
-				if strings.Contains(system, "topics 为12个") {
+				if strings.Contains(system, "topics 为") {
 					return topicFixture()
 				}
 				return approvedDirectorResponse(system)

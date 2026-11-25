@@ -54,7 +54,7 @@ func TestCompanionSoak90Minutes(t *testing.T) {
 		if sys == auditRules {
 			return `{"allow":true,"category":"safe"}`
 		}
-		if strings.Contains(sys, "topics 为12个") {
+		if strings.Contains(sys, "topics 为") {
 			return strings.ReplaceAll(topicFixture(), "生活话题", fmt.Sprintf("生活主题%d组", batches.Add(1)))
 		}
 		n := calls.Add(1)
