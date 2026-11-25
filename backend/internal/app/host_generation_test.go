@@ -25,8 +25,16 @@ func TestTopicReserveRefill(t *testing.T) {
 	if e != nil || len(ts) != 12 {
 		t.Fatal(ts, e)
 	}
-	if _, _, e = parseTopics(topicFixture(), HostInput{RecentTopicKeys: []string{ts[0].Key}}); e == nil {
-		t.Fatal("accepted repeated title")
+	fresh, _, e := parseTopics(topicFixture(), HostInput{RecentTopicKeys: []string{ts[0].Key}})
+	if e != nil || len(fresh) != 11 || fresh[0].Key != ts[1].Key {
+		t.Fatal("one repeated title should not discard eleven fresh topics", fresh, e)
+	}
+	var recent []string
+	for _, topic := range ts {
+		recent = append(recent, topic.Key)
+	}
+	if _, _, e = parseTopics(topicFixture(), HostInput{RecentTopicKeys: recent}); e == nil {
+		t.Fatal("accepted a batch with no fresh titles")
 	}
 }
 func TestHostDraftBoundsAndDedup(t *testing.T) {
