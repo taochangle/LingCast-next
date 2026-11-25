@@ -18,6 +18,7 @@ services:
       WORKER_TOKEN: ${WORKER_TOKEN:?Set WORKER_TOKEN}
       WORKER_URL: ${WORKER_URL:?Set WORKER_URL}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?Set PUBLIC_BASE_URL}
+      WORKER_MEDIA_BASE_URL: ${WORKER_MEDIA_BASE_URL:-}
       LLM_URL: ${LLM_URL:-}
       LLM_TOKEN: ${LLM_TOKEN:?Set LLM_TOKEN (use a generated unused token if LLM is disabled)}
       LLM_MODEL: ${LLM_MODEL:-}

@@ -26,6 +26,12 @@ import (
 func (a *App) mediaURL(i string) string {
 	return strings.TrimRight(a.c.PublicBaseURL, "/") + "/media/" + i + "?token=" + url.QueryEscape(a.c.MediaToken)
 }
+func (a *App) workerMediaURL(i string) string {
+	if a.c.WorkerMediaBaseURL == "" {
+		return a.mediaURL(i)
+	}
+	return strings.TrimRight(a.c.WorkerMediaBaseURL, "/") + "/media/" + i + "?token=" + url.QueryEscape(a.c.MediaToken)
+}
 func (a *App) publicMedia(o object) object {
 	v := object{}
 	for k, x := range o {

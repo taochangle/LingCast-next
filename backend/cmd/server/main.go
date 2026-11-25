@@ -18,7 +18,7 @@ func main() {
 			log.Fatal("Invalid WORKER_START_TIMEOUT")
 		}
 	}
-	h, e := app.New(app.Config{WorkerStartTimeout: startTimeout, DataDir: g("DATA_DIR"), AdminToken: g("ADMIN_TOKEN"), MediaToken: g("MEDIA_TOKEN"), WorkerURL: g("WORKER_URL"), WorkerToken: g("WORKER_TOKEN"), LLMURL: g("LLM_URL"), LLMToken: g("LLM_TOKEN"), LLMModel: g("LLM_MODEL"), Timezone: g("TIMEZONE"), PublicBaseURL: g("PUBLIC_BASE_URL"), StaticDir: g("STATIC_DIR")})
+	h, e := app.New(app.Config{WorkerStartTimeout: startTimeout, DataDir: g("DATA_DIR"), AdminToken: g("ADMIN_TOKEN"), MediaToken: g("MEDIA_TOKEN"), WorkerURL: g("WORKER_URL"), WorkerToken: g("WORKER_TOKEN"), LLMURL: g("LLM_URL"), LLMToken: g("LLM_TOKEN"), LLMModel: g("LLM_MODEL"), Timezone: g("TIMEZONE"), PublicBaseURL: g("PUBLIC_BASE_URL"), WorkerMediaBaseURL: g("WORKER_MEDIA_BASE_URL"), StaticDir: g("STATIC_DIR")})
 	if e != nil {
 		log.Fatal(e)
 	}

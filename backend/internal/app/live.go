@@ -313,10 +313,10 @@ func (a *App) start(w http.ResponseWriter, r *http.Request) {
 	for _, i := range a.list("idles") {
 		if i["lookId"] == b.LookID {
 			m := a.get("media", str(i, "mediaId"))
-			idles = append(idles, object{"id": i["id"], "url": a.mediaURL(str(i, "mediaId")), "sha256": m["sha256"]})
+			idles = append(idles, object{"id": i["id"], "url": a.workerMediaURL(str(i, "mediaId")), "sha256": m["sha256"]})
 		}
 	}
-	payload := object{"sessionId": s["id"], "avatarId": b.AvatarID, "lookId": b.LookID, "voiceId": avatar["voiceId"], "imageUrl": a.mediaURL(str(look, "imageId")), "idles": idles, "defaultIdleId": look["defaultIdleId"], "platform": b.Platform}
+	payload := object{"sessionId": s["id"], "avatarId": b.AvatarID, "lookId": b.LookID, "voiceId": avatar["voiceId"], "imageUrl": a.workerMediaURL(str(look, "imageId")), "idles": idles, "defaultIdleId": look["defaultIdleId"], "platform": b.Platform}
 	a.mu.Unlock()
 	var health struct {
 		Ready bool `json:"ready"`

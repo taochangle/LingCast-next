@@ -20,11 +20,11 @@ import (
 )
 
 type Config struct {
-	WorkerStartTimeout                                                                                                      time.Duration
-	DataDir, AdminToken, MediaToken, WorkerURL, WorkerToken, LLMURL, LLMToken, LLMModel, Timezone, PublicBaseURL, StaticDir string
-	HTTPClient                                                                                                              *http.Client
-	Clock                                                                                                                   func() time.Time
-	HostRandom                                                                                                              func(int) int
+	WorkerStartTimeout                                                                                                                          time.Duration
+	DataDir, AdminToken, MediaToken, WorkerURL, WorkerToken, LLMURL, LLMToken, LLMModel, Timezone, PublicBaseURL, WorkerMediaBaseURL, StaticDir string
+	HTTPClient                                                                                                                                  *http.Client
+	Clock                                                                                                                                       func() time.Time
+	HostRandom                                                                                                                                  func(int) int
 }
 type App struct {
 	done           chan struct{}
