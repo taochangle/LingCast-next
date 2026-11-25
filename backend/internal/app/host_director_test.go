@@ -225,7 +225,11 @@ func TestDirectorFailureBackoff(t *testing.T) {
 	f, sid := directorFixture(t)
 	now := f.a.c.Clock()
 	f.a.c.Clock = func() time.Time { return now }
-	modelFixture(t, f.a, func(string) string { return `invalid JSON` })
+	unavailable := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer unavailable.Close()
+	f.a.c.LLMURL = unavailable.URL
 	for _, seconds := range []int{5, 15, 30, 60, 60} {
 		if err := f.a.CompanionTick(context.Background(), sid); err == nil {
 			t.Fatal("missing generation failure")
@@ -610,5 +614,36 @@ func TestNewSessionCanResumeUnspokenAnglesFromAnActiveTopic(t *testing.T) {
 	}
 	if in.CurrentTopic.ID != "a" || in.CurrentAngleID != "two" {
 		t.Fatal(in.CurrentTopic, in.CurrentAngleID)
+	}
+}
+
+func TestCompanionUnusableDraftAdvancesToAnotherAngle(t *testing.T) {
+	f, sid := directorFixture(t)
+	now := f.a.c.Clock()
+	f.a.c.Clock = func() time.Time { return now }
+	calls := 0
+	modelFixture(t, f.a, func(system string) string {
+		if system != auditRules {
+			calls++
+			if calls <= 2 {
+				return `{"action":"speak","text":"太短。"}`
+			}
+		}
+		return approvedDirectorResponse(system)
+	})
+	if err := f.a.CompanionTick(context.Background(), sid); err != nil {
+		t.Fatal(err)
+	}
+	status := f.a.CompanionStatus(sid)
+	if len(f.tasks) != 0 || status.State != "waiting" || status.NextEligibleAt == nil {
+		t.Fatal(f.tasks, status)
+	}
+	now = *status.NextEligibleAt
+	if err := f.a.CompanionTick(context.Background(), sid); err != nil || len(f.tasks) != 1 {
+		t.Fatal(err, f.tasks)
+	}
+	var angle string
+	if err := f.a.db.QueryRow("SELECT angle_id FROM host_tasks WHERE session_id=?", sid).Scan(&angle); err != nil || angle != "two" {
+		t.Fatal(err, angle)
 	}
 }

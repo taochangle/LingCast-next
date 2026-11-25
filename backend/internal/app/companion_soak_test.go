@@ -125,7 +125,7 @@ func TestCompanionSoak90Minutes(t *testing.T) {
 		err := f.a.CompanionTick(context.Background(), sid)
 		if minute == 45 {
 			status := f.a.CompanionStatus(sid)
-			if err == nil || status.NextEligibleAt == nil || !status.NextEligibleAt.Equal(now.Add(5*time.Second)) {
+			if err != nil || status.State != "waiting" || status.NextEligibleAt == nil || !status.NextEligibleAt.Equal(now.Add(2*time.Second)) {
 				t.Fatal(err, status)
 			}
 			n := calls.Load()

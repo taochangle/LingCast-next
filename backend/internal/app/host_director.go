@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
-	"strings"
 	"time"
 )
 
@@ -295,7 +294,7 @@ func (a *App) CompanionTick(parent context.Context, sid string) (err error) {
 	d.status.TopicTitle = in.CurrentTopic.Title
 	a.mu.Unlock()
 	draft, e := a.BuildHostDraft(ctx, in)
-	if errors.Is(e, errHostAngleSkipped) {
+	if errors.Is(e, errHostAngleSkipped) || errors.Is(e, errGeneration) {
 		a.mu.Lock()
 		defer a.mu.Unlock()
 		if a.director == d && ctx.Err() == nil && a.validHostInput(in) {
@@ -315,18 +314,7 @@ func (a *App) CompanionTick(parent context.Context, sid string) (err error) {
 	if e != nil {
 		return e
 	}
-	if strings.ContainsAny(draft.Text, "?？") {
-		n := 0
-		for i := len(in.SpokenTurns) - 1; i >= 0 && n < 2; i-- {
-			turn := in.SpokenTurns[i]
-			if turn.Source == "host" {
-				n++
-				if strings.ContainsAny(turn.Text, "?？") {
-					return errGeneration
-				}
-			}
-		}
-	}
+
 	state, e = a.hostWorker(ctx, sid)
 	if e != nil {
 		return e

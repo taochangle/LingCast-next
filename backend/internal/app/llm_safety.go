@@ -93,6 +93,9 @@ func (a *App) generateSpeech(ctx context.Context, in HostInput, source string) (
 	rules := speechRules
 	if source == "host" {
 		rules += " 围绕currentAngleId对应的角度讲40至120字，1至3句，避免复读。"
+		if recentHostAsked(in.SpokenTurns) {
+			rules += " 这段用陈述句，不向观众提问，不使用问号。"
+		}
 	}
 	raw, err := a.chatContent(ctx, hostSystem(in, rules), object{"suggestedInterests": in.SuggestedInterests, "source": source, "currentAngleId": in.CurrentAngleID, "currentTopic": in.CurrentTopic, "spokenTurns": in.SpokenTurns, "viewerTurns": in.ViewerTurns, "recentTopicKeys": in.RecentTopicKeys})
 	if err != nil {

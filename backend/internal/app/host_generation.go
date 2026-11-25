@@ -60,6 +60,19 @@ func nearSpeech(a, b string) bool {
 	}
 	return 4*n >= 3*(len(x)+len(y)-n)
 }
+func recentHostAsked(turns []SpokenTurn) bool {
+	count := 0
+	for i := len(turns) - 1; i >= 0 && count < 2; i-- {
+		if turns[i].Source == "host" {
+			count++
+			if strings.ContainsAny(turns[i].Text, "?？") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func draftLength(s string) bool {
 	n := utf8.RuneCountInString(strings.TrimSpace(s))
 	sentences := strings.FieldsFunc(s, func(r rune) bool { return strings.ContainsRune("。！？!?.\n", r) })
@@ -405,7 +418,7 @@ func (a *App) BuildHostDraft(ctx context.Context, in HostInput) (HostDraft, erro
 		if s == "" {
 			return zero, errHostAngleSkipped
 		}
-		if !draftLength(s) {
+		if !draftLength(s) || (recentHostAsked(in.SpokenTurns) && strings.ContainsAny(s, "?？")) {
 			continue
 		}
 		dup := false
