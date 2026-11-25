@@ -10,6 +10,8 @@ import threading
 import time
 from urllib.parse import urlsplit
 
+from worker.media import normalize_idles
+
 
 def terminate(process):
     if process is None:
@@ -30,6 +32,8 @@ def terminate(process):
 
 
 class LiveOutput:
+    normalize_idles = staticmethod(normalize_idles)
+
     def __init__(self, sid, paths):
         self.sid = sid
         self.paths = paths
