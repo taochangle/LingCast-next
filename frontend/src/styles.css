@@ -897,6 +897,31 @@ details[open] .chevron {
 .nav-short-label {
   display: none;
 }
+.operator-messages {
+  position: fixed;
+  inset-block-start: max(16px, env(safe-area-inset-top));
+  inset-inline-end: max(16px, env(safe-area-inset-right));
+  z-index: 20;
+  display: grid;
+  gap: 8px;
+  width: min(380px, calc(100% - 32px));
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+}
+.operator-messages > :is(.alert, .notice) {
+  margin: 0;
+  border: 1px solid currentColor;
+}
+.operator-messages .notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.operator-messages .notice .text {
+  flex-shrink: 0;
+  color: inherit;
+}
 .operator-alert details {
   font-size: 12px;
   margin-top: 5px;

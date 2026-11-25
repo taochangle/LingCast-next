@@ -746,3 +746,56 @@ it("keeps fixed-session controls without requesting companion status", async () 
   expect(screen.queryByText("主持状态")).toBeNull();
   expect(calls.some((call) => call.url.endsWith("/host-status"))).toBe(false);
 });
+
+it("shows idle upload errors and success in dismissible viewport messages", async () => {
+  const original = globalThis.fetch;
+  let rejectUpload = true;
+  let attached: string | undefined;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((path, options) => {
+      if (path === "/api/media" && options?.method === "POST") {
+        return Promise.resolve(
+          rejectUpload
+            ? new Response(
+                JSON.stringify({ error: "Video conversion failed" }),
+                { status: 400 },
+              )
+            : new Response(JSON.stringify({ id: "normalized-idle" }), {
+                status: 201,
+              }),
+        );
+      }
+      if (path === "/api/looks/la/idles" && options?.method === "POST") {
+        attached = JSON.parse(options.body).mediaId;
+        return Promise.resolve(new Response("{}", { status: 201 }));
+      }
+      return original(path, options);
+    }),
+  );
+  render(<App />);
+  fireEvent.change(await screen.findByLabelText("直播人物"), {
+    target: { value: "a" },
+  });
+  await screen.findByRole("option", { name: "春装" });
+  fireEvent.change(screen.getByLabelText("直播形象"), {
+    target: { value: "la" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "上传 / 更换底片" }));
+  const input = await screen.findByLabelText(/上传底片 \/ 待机视频/);
+  const file = new File(["video"], "idle.mp4", { type: "video/mp4" });
+  fireEvent.change(input, { target: { files: [file] } });
+  const error = await screen.findByRole("alert");
+  expect(error).toHaveTextContent("视频处理失败");
+  expect(error.closest(".operator-messages")).not.toBeNull();
+  expect(attached).toBeUndefined();
+  fireEvent.click(screen.getByRole("button", { name: "关闭" }));
+  expect(screen.queryByRole("alert")).toBeNull();
+
+  rejectUpload = false;
+  fireEvent.change(input, { target: { files: [file] } });
+  const success = await screen.findByText("视频已处理并添加到素材列表");
+  expect(success.closest(".operator-messages")).not.toBeNull();
+  expect(success).toHaveAttribute("role", "status");
+  expect(attached).toBe("normalized-idle");
+});

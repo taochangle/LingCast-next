@@ -180,7 +180,7 @@ func TestExternalPlaylistRejectedWithoutFetch(t *testing.T) {
 		t.Fatal("playlist accessed external resource", w.Code, hits.Load())
 	}
 }
-func TestSilentVideoValidation(t *testing.T) {
+func TestVideoUploadStoresOnlyVideoTrack(t *testing.T) {
 	if _, e := exec.LookPath("ffmpeg"); e != nil {
 		t.Skip("ffmpeg unavailable")
 	}
@@ -210,12 +210,17 @@ func TestSilentVideoValidation(t *testing.T) {
 			r.Header.Set("Content-Type", mw.FormDataContentType())
 			w := httptest.NewRecorder()
 			f.h.ServeHTTP(w, r)
-			want := 201
-			if audio {
-				want = 400
-			}
-			if w.Code != want {
+			if w.Code != 201 {
 				t.Fatal(w.Code, w.Body.String())
+			}
+			var media object
+			if e := json.Unmarshal(w.Body.Bytes(), &media); e != nil {
+				t.Fatal(e)
+			}
+			stored := filepath.Join(f.a.c.DataDir, "media", str(media, "id"))
+			streams, e := exec.Command("ffprobe", "-v", "error", "-show_entries", "stream=codec_type", "-of", "csv=p=0", stored).CombinedOutput()
+			if e != nil || strings.TrimSpace(string(streams)) != "video" {
+				t.Fatalf("stored streams: %s (%v)", streams, e)
 			}
 		})
 	}

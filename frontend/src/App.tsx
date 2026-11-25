@@ -199,7 +199,7 @@ export default function App() {
   const refresh = useCallback(async () => {
     await Promise.all([api<Avatar[]>("/avatars").then(setAvatars), readLive()]);
   }, [readLive]);
-  const act = async (fn: () => Promise<void>) => {
+  const act: Action = async (fn, successMessage) => {
     setError("");
     setNotice("");
     setBusy(true);
@@ -207,6 +207,7 @@ export default function App() {
     liveVersion.current++;
     try {
       await fn();
+      if (successMessage) setNotice(successMessage);
     } catch (e) {
       setError(e instanceof Error ? e.message : "操作失败，请重试");
     } finally {
@@ -346,24 +347,31 @@ export default function App() {
             刷新状态
           </button>
         </header>
-        {error && (
-          <OperatorAlert
-            detail={error}
-            busy={busy}
-            onClose={() => setError("")}
-            onSettings={
-              page === "settings"
-                ? undefined
-                : () => {
-                    setPage("settings");
-                    setError("");
-                  }
-            }
-          />
-        )}
-        {notice && (
-          <div role="status" className="notice">
-            {notice}
+        {(error || notice) && (
+          <div className="operator-messages">
+            {error && (
+              <OperatorAlert
+                detail={error}
+                busy={busy}
+                onClose={() => setError("")}
+                onSettings={
+                  page === "settings"
+                    ? undefined
+                    : () => {
+                        setPage("settings");
+                        setError("");
+                      }
+                }
+              />
+            )}
+            {notice && (
+              <div className="notice">
+                <span role="status">{notice}</span>
+                <button className="text" onClick={() => setNotice("")}>
+                  关闭
+                </button>
+              </div>
+            )}
           </div>
         )}
         {page === "studio" && (
@@ -859,7 +867,10 @@ export default function App() {
     </div>
   );
 }
-type Action = (fn: () => Promise<void>) => Promise<void>;
+type Action = (
+  fn: () => Promise<void>,
+  successMessage?: string,
+) => Promise<void>;
 function ModeSelect({
   label,
   value,
@@ -1328,7 +1339,7 @@ function AvatarManager({
                     </button>
                   </div>
                 ))}
-                <Field label="上传底片 / 待机视频（静音，最大 200 MiB）">
+                <Field label="上传底片 / 待机视频（最大 200 MiB）">
                   <input
                     type="file"
                     accept="video/*"
@@ -1344,11 +1355,12 @@ function AvatarManager({
                             mediaId: m.id,
                           });
                           await loadIdles();
-                        });
+                        }, "视频已处理并添加到素材列表");
                       e.target.value = "";
                     }}
                   />
                 </Field>
+                <p className="hint">上传后自动去除音轨，并转换为 25 fps。</p>
               </div>
             )}
           </section>

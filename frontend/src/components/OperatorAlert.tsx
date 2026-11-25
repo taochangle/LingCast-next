@@ -7,6 +7,8 @@ const messages: Record<string, string> = {
   "Worker unavailable": "暂时无法连接直播处理服务。请检查服务连接后重试。",
   "Relay update failed": "转推设置未能更新。请检查服务连接，再确认转推状态。",
   "Default idle required": "请先到人物与素材中指定一条默认口型底片。",
+  "Video conversion failed": "视频处理失败。请换一个可正常播放的视频后重试。",
+  "Converted video exceeds size limit": "处理后的视频超过 200 MiB，请缩短视频后重试。",
   Unauthorized:
     "管理员令牌未通过验证。请断开管理连接，使用正确的令牌重新连接。",
 };

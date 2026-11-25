@@ -129,15 +129,9 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request) {
 			fail(w, 400, "Video must have a positive duration")
 			return
 		}
-		video := false
 		videoCount := 0
 		for _, s := range probe.Streams {
-			if s.CodecType == "audio" {
-				fail(w, 400, "Idle videos must be silent")
-				return
-			}
 			if s.CodecType == "video" {
-				video = true
 				videoCount++
 				var num, den float64 // ffprobe rational frame rate
 				if _, e = fmt.Sscanf(s.Rate, "%f/%f", &num, &den); e != nil || den <= 0 || num/den <= 0 || num/den > 120 || s.Width <= 0 || s.Height <= 0 || s.Width > 4096 || s.Height > 4096 {
@@ -149,7 +143,7 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request) {
 				o["fps"] = num / den
 			}
 		}
-		if !video || videoCount != 1 {
+		if videoCount != 1 {
 			fail(w, 400, "Video required")
 			return
 		}
