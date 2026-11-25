@@ -3,14 +3,18 @@ package app
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"math/rand"
 	"strings"
 	"time"
 )
 
+type hostAngleKey struct{ topic, angle string }
+
 // Access director fields under App.mu. Each in-flight tick owns its director
 // pointer until invalidation; late callbacks cannot change a replacement.
+
 type hostDirector struct {
 	sid         string
 	cancel      context.CancelFunc
@@ -20,6 +24,7 @@ type hostDirector struct {
 	completed   time.Time
 	submittedID string
 	expiresAt   time.Time
+	skipped     map[hostAngleKey]struct{}
 }
 
 func hostPause(sw, quiet bool, pick func(int) int) time.Duration {
@@ -96,7 +101,7 @@ func (a *App) CompanionStatus(sid string) HostStatus {
 	}
 	return a.hostStatusLocked(s)
 }
-func (a *App) selectHostAngle(in *HostInput) error {
+func (a *App) selectHostAngle(in *HostInput, skipped map[hostAngleKey]struct{}) error {
 	currentID := ""
 	if in.CurrentTopic != nil {
 		currentID = in.CurrentTopic.ID
@@ -109,6 +114,9 @@ func (a *App) selectHostAngle(in *HostInput) error {
 	}
 	for _, t := range ts {
 		for _, angle := range t.Angles {
+			if _, skip := skipped[hostAngleKey{t.ID, angle.ID}]; skip {
+				continue
+			}
 			var used bool
 			e = a.db.QueryRow("SELECT EXISTS(SELECT 1 FROM host_tasks WHERE session_id=? AND topic_id=? AND angle_id=? AND state IN ('pending','completed','unknown') UNION ALL SELECT 1 FROM host_recent_keys WHERE avatar_id=? AND key=? AND seen_at>=?)", in.SessionID, t.ID, angle.ID, in.AvatarID, t.Key+"/"+speechKey(angle.Text), in.ServerTime.Add(-7*24*time.Hour).Unix()).Scan(&used)
 			if e != nil {
@@ -265,11 +273,21 @@ func (a *App) CompanionTick(parent context.Context, sid string) (err error) {
 	a.mu.Lock()
 	d.status.State = "preparing"
 	d.status.NextEligibleAt = nil
+	skipped := d.skipped // Only the current tick mutates this director’s set.
 	a.mu.Unlock()
 	_, reserveErr := a.BuildTopics(ctx, in)
-	if e = a.selectHostAngle(&in); e != nil {
+	if e = a.selectHostAngle(&in, skipped); e != nil {
 		if reserveErr != nil {
 			return reserveErr
+		}
+		if errors.Is(e, sql.ErrNoRows) && len(skipped) != 0 {
+			a.mu.Lock()
+			defer a.mu.Unlock()
+			if a.director == d && ctx.Err() == nil {
+				d.skipped = nil
+				d.waitAfterSkip(a.c.Clock(), time.Minute)
+			}
+			return nil
 		}
 		return e
 	}
@@ -277,6 +295,23 @@ func (a *App) CompanionTick(parent context.Context, sid string) (err error) {
 	d.status.TopicTitle = in.CurrentTopic.Title
 	a.mu.Unlock()
 	draft, e := a.BuildHostDraft(ctx, in)
+	if errors.Is(e, errHostAngleSkipped) {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		if a.director == d && ctx.Err() == nil && a.validHostInput(in) {
+			if d.skipped == nil {
+				d.skipped = make(map[hostAngleKey]struct{})
+			}
+			d.skipped[hostAngleKey{in.CurrentTopic.ID, in.CurrentAngleID}] = struct{}{}
+			if len(d.skipped) >= maxReadyHostTopics*5 {
+				d.skipped = nil
+				d.waitAfterSkip(a.c.Clock(), time.Minute)
+			} else {
+				d.waitAfterSkip(a.c.Clock(), 2*time.Second)
+			}
+		}
+		return nil
+	}
 	if e != nil {
 		return e
 	}
@@ -320,4 +355,13 @@ func (a *App) CompanionTick(parent context.Context, sid string) (err error) {
 	d.failures = 0
 	d.status.LastError = ""
 	return nil
+}
+
+// waitAfterSkip leaves the Worker idle and schedules another host selection.
+func (d *hostDirector) waitAfterSkip(now time.Time, delay time.Duration) {
+	at := now.Add(delay)
+	d.status.State = "waiting"
+	d.status.NextEligibleAt = &at
+	d.status.LastError = ""
+	d.failures = 0
 }

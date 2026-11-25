@@ -107,7 +107,7 @@ func TestCompanionFlow(t *testing.T) {
 	if in.CurrentAngleID != "one" {
 		t.Fatal(in)
 	}
-	if err := f.a.selectHostAngle(&in); err != nil || in.CurrentAngleID != "two" {
+	if err := f.a.selectHostAngle(&in, nil); err != nil || in.CurrentAngleID != "two" {
 		t.Fatal(in, err)
 	}
 }
@@ -225,7 +225,7 @@ func TestDirectorFailureBackoff(t *testing.T) {
 	f, sid := directorFixture(t)
 	now := f.a.c.Clock()
 	f.a.c.Clock = func() time.Time { return now }
-	modelFixture(t, f.a, func(string) string { return `{"action":"skip"}` })
+	modelFixture(t, f.a, func(string) string { return `invalid JSON` })
 	for _, seconds := range []int{5, 15, 30, 60, 60} {
 		if err := f.a.CompanionTick(context.Background(), sid); err == nil {
 			t.Fatal("missing generation failure")
@@ -320,7 +320,7 @@ func TestRestartDoesNotReplayUnknown(t *testing.T) {
 	if e != nil || in.CurrentAngleID != "" || len(in.SpokenTurns) > 0 {
 		t.Fatal(in, e)
 	}
-	if e = a.selectHostAngle(&in); e != nil || in.CurrentTopic.ID == "d" && in.CurrentAngleID == "one" {
+	if e = a.selectHostAngle(&in, nil); e != nil || in.CurrentTopic.ID == "d" && in.CurrentAngleID == "one" {
 		t.Fatal(in, e)
 	}
 }
@@ -550,5 +550,42 @@ func TestStopBeforeFirstReceiptRetiresTopic(t *testing.T) {
 	var remaining int
 	if err := f.a.db.QueryRow("SELECT COUNT(*) FROM host_topics WHERE id='a' AND state='ready'").Scan(&remaining); err != nil || remaining != 0 {
 		t.Fatal("unresolved first topic without receipt cursor", remaining, err)
+	}
+}
+
+func TestCompanionSkipAdvancesWithoutRecordingPlayback(t *testing.T) {
+	f, sid := directorFixture(t)
+	now := f.a.c.Clock()
+	f.a.c.Clock = func() time.Time { return now }
+	calls := 0
+	modelFixture(t, f.a, func(system string) string {
+		if system != auditRules {
+			calls++
+			if calls == 1 {
+				return `{"action":"skip"}`
+			}
+		}
+		return approvedDirectorResponse(system)
+	})
+	if err := f.a.CompanionTick(context.Background(), sid); err != nil {
+		t.Fatal(err)
+	}
+	status := f.a.CompanionStatus(sid)
+	if len(f.tasks) != 0 || status.State != "waiting" || status.LastError != "" || status.NextEligibleAt == nil {
+		t.Fatal(f.tasks, status)
+	}
+	now = *status.NextEligibleAt
+	if err := f.a.CompanionTick(context.Background(), sid); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.tasks) != 1 {
+		t.Fatal(f.tasks)
+	}
+	var topic, angle string
+	if err := f.a.db.QueryRow("SELECT topic_id,angle_id FROM host_tasks WHERE session_id=?", sid).Scan(&topic, &angle); err != nil {
+		t.Fatal(err)
+	}
+	if topic != "d" || angle != "two" {
+		t.Fatalf("queued %s/%s after skipping d/one", topic, angle)
 	}
 }

@@ -11,6 +11,7 @@ import (
 )
 
 var errGeneration = errors.New("主持素材暂不可用")
+var errHostAngleSkipped = errors.New("模型跳过当前主持角度")
 var errStale = errors.New("人物或会话已经变更")
 var errBackoff = errors.New("稍后再试")
 
@@ -377,7 +378,7 @@ func (a *App) BuildHostDraft(ctx context.Context, in HostInput) (HostDraft, erro
 			return zero, e
 		}
 		if s == "" {
-			return zero, errGeneration
+			return zero, errHostAngleSkipped
 		}
 		if !draftLength(s) {
 			continue

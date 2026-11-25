@@ -134,7 +134,7 @@ func TestPromptAttackCorpus(t *testing.T) {
 				if _, e := f.a.db.Exec(`INSERT INTO host_topics VALUES('safe','a1','tree','树影','[{"id":"one","text":"叶片"}]','ready',?)`, f.a.c.Clock().Unix()); e != nil {
 					t.Fatal(e)
 				}
-				if err := f.a.selectHostAngle(&in); err != nil || in.CurrentTopic.ID != "safe" {
+				if err := f.a.selectHostAngle(&in, nil); err != nil || in.CurrentTopic.ID != "safe" {
 					t.Fatal(in, err)
 				}
 			}
