@@ -36,3 +36,24 @@ func TestThinkingOverrideIsExplicitAndOptional(t *testing.T) {
 		server.Close()
 	}
 }
+
+func TestEmptyToolCallsAreNotAnOperation(t *testing.T) {
+	for _, tc := range []struct {
+		raw   string
+		allow bool
+	}{
+		{`null`, true}, {`[]`, true}, {`[ {"type":"function","function":{"name":"change_settings"}} ]`, false}, {`{}`, false}, {`"invalid"`, false},
+	} {
+		f := newFixture(t)
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"action\":\"skip\"}","tool_calls":` + tc.raw + `}}]}`))
+		}))
+		f.a.c.LLMURL = server.URL
+		_, e := f.a.chatContent(context.Background(), "system", object{})
+		if (e == nil) != tc.allow {
+			t.Errorf("tool_calls=%s allowed=%v err=%v", tc.raw, tc.allow, e)
+		}
+		server.Close()
+	}
+}

@@ -42,7 +42,13 @@ func (a *App) chatContent(ctx context.Context, system string, data any) (string,
 		return "", errors.New("Invalid model response")
 	}
 	message := out.Choices[0].Message
-	if message.ToolCalls != nil && string(message.ToolCalls) != "null" || message.FunctionCall != nil && string(message.FunctionCall) != "null" {
+	if message.ToolCalls != nil {
+		var calls []json.RawMessage
+		if json.Unmarshal(message.ToolCalls, &calls) != nil || len(calls) != 0 {
+			return "", errModelOperation
+		}
+	}
+	if message.FunctionCall != nil && string(message.FunctionCall) != "null" {
 		return "", errModelOperation
 	}
 	return message.Content, nil
