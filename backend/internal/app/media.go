@@ -95,7 +95,7 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request) {
 		o["width"] = cfg.Width
 		o["height"] = cfg.Height
 	} else {
-		ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+		ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
 		defer cancel()
 		format, detectErr := videoFormat(path)
 		if detectErr != nil {
@@ -130,6 +130,7 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		video := false
+		videoCount := 0
 		for _, s := range probe.Streams {
 			if s.CodecType == "audio" {
 				fail(w, 400, "Idle videos must be silent")
@@ -137,6 +138,7 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request) {
 			}
 			if s.CodecType == "video" {
 				video = true
+				videoCount++
 				var num, den float64 // ffprobe rational frame rate
 				if _, e = fmt.Sscanf(s.Rate, "%f/%f", &num, &den); e != nil || den <= 0 || num/den <= 0 || num/den > 120 || s.Width <= 0 || s.Height <= 0 || s.Width > 4096 || s.Height > 4096 {
 					fail(w, 400, "Unsupported video dimensions or frame rate")
@@ -147,16 +149,45 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request) {
 				o["fps"] = num / den
 			}
 		}
-		if !video {
+		if !video || videoCount != 1 {
 			fail(w, 400, "Video required")
 			return
 		}
-		decodeArgs := append([]string{"-v", "error", "-xerror", "-max_alloc", "134217728", "-threads", "2"}, inputArgs...)
-		decodeArgs = append(decodeArgs, "-i", path, "-f", "null", "-")
-		if e = exec.CommandContext(ctx, "ffmpeg", decodeArgs...).Run(); e != nil {
-			fail(w, 400, "Video decode failed")
+		normalized, e := os.CreateTemp(filepath.Dir(path), "normalized-*.mp4")
+		if e != nil {
+			fail(w, 500, "Storage unavailable")
 			return
 		}
+		normalizedPath := normalized.Name()
+		_ = normalized.Close()
+		defer os.Remove(normalizedPath)
+		encodeArgs := append([]string{"-v", "error", "-xerror", "-nostdin", "-y", "-max_alloc", "134217728", "-threads", "2"}, inputArgs...)
+		encodeArgs = append(encodeArgs, "-i", path, "-map", "0:v:0", "-vf", "fps=25,pad=ceil(iw/2)*2:ceil(ih/2)*2", "-an", "-c:v", "libx264", "-threads", "2", "-preset", "fast", "-crf", "18", "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-f", "mp4", normalizedPath)
+		if e = exec.CommandContext(ctx, "ffmpeg", encodeArgs...).Run(); e != nil {
+			fail(w, 400, "Video conversion failed")
+			return
+		}
+		converted, e := os.Open(normalizedPath)
+		if e != nil {
+			fail(w, 500, "Storage unavailable")
+			return
+		}
+		h.Reset()
+		n, e = io.Copy(h, io.LimitReader(converted, (200<<20)+1))
+		_ = converted.Close()
+		if e != nil || n == 0 || n > 200<<20 {
+			fail(w, 400, "Converted video exceeds size limit")
+			return
+		}
+		if e = os.Rename(normalizedPath, path); e != nil {
+			fail(w, 500, "Storage unavailable")
+			return
+		}
+		o["sha256"] = hex.EncodeToString(h.Sum(nil))
+		o["fps"] = 25
+		width, height := o["width"].(int), o["height"].(int)
+		o["width"], o["height"] = width+width%2, height+height%2
+
 		o["kind"] = "video"
 	}
 	dest := filepath.Join(a.c.DataDir, "media", str(o, "id"))
