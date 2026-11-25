@@ -24,7 +24,6 @@ class LifecycleReviewTests(unittest.TestCase):
                 pass
 
         class BrokenOutput(LiveOutput):
-            normalize_idles = staticmethod(lambda paths: None)  # Synthetic idle fixture.
             def start(self):
                 self.cv2 = SimpleNamespace(VideoCapture=lambda path: Capture())
 
@@ -70,7 +69,6 @@ class LifecycleReviewTests(unittest.TestCase):
                 pass
 
         class WaitingWriter(LiveOutput):
-            normalize_idles = staticmethod(lambda paths: None)  # Synthetic idle fixture.
             def start(self):
                 self.cv2 = SimpleNamespace(VideoCapture=lambda path: Capture())
 

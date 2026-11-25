@@ -99,12 +99,6 @@ class SessionManager:
                     self.sha = item["sha256"]
             if self.cancel.is_set():
                 raise ValueError("start cancelled")
-            normalize = getattr(self.output_factory, "normalize_idles", None)
-            if normalize is not None:
-                normalize(paths)
-                if self.cancel.is_set():
-                    raise ValueError("start cancelled")
-                self.sha = hashlib.sha256(self.base.read_bytes()).hexdigest()
             self.models.prepare(payload["lookId"], self.base, self.sha)
             with self.lock:
                 if self.cancel.is_set():
