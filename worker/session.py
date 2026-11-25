@@ -176,10 +176,17 @@ class SessionManager:
                 if hasattr(self.models, "cancel_render")
                 else self.models.render(*args)
             )
-            for pcm, frames in stream:
-                if cancel.is_set():
-                    return False
-                output.submit(pcm, frames, cancel)
+            try:
+                if hasattr(output, "submit_segment"):
+                    output.submit_segment(stream, cancel)
+                else:
+                    for pcm, frames in stream:
+                        if cancel.is_set():
+                            return False
+                        output.submit(pcm, frames, cancel)
+            finally:
+                if hasattr(stream, "close"):
+                    stream.close()
             if hasattr(output, "drain"):
                 output.drain(cancel)
             with self.lock:

@@ -1,6 +1,5 @@
 """Clocked BGR/PCM muxer for Linux/WSL2. Based on LingCast ffmpeg_pipe interleaving."""
 
-import base64
 import json
 import os
 import queue
@@ -8,6 +7,7 @@ import select
 import subprocess
 import threading
 import time
+from collections import deque
 from urllib.parse import urlsplit
 
 
@@ -40,7 +40,7 @@ class LiveOutput:
         self.video = None
         self.capture = None
         self.closed = threading.Event()
-        self.packets = queue.Queue(maxsize=50)
+        self.packets = queue.Queue(maxsize=1)
         self.writer = None
         self.failure = None
         self.cancel_inference = lambda: None
@@ -216,25 +216,36 @@ class LiveOutput:
                     except BlockingIOError:
                         pass
 
-    def submit(self, pcm, frames, cancel):
+    def submit_segment(self, stream, cancel):
+        # Buffer compressed pairs until this short segment is fully rendered.
+        # The writer then never has to wait for an inference window mid-sentence.
+        segment = deque()
+        size = 0
+        for pcm, frames in stream:
+            if cancel.is_set() or self.closed.is_set():
+                return
+            if len(pcm) != len(frames) * 1280:
+                raise ValueError("speech audio/video length mismatch")
+            size += len(pcm) + sum(map(len, frames))
+            if size > 256 * 1024 * 1024:
+                raise ValueError("speech segment exceeds buffer limit")
+            segment.extend((frame, pcm[i * 1280 : (i + 1) * 1280])
+                           for i, frame in enumerate(frames))
+        if cancel.is_set() or self.closed.is_set():
+            return
+        if not segment:
+            raise ValueError("empty speech segment")
+        self.packets.put_nowait(segment)
+
+    def decode_frame(self, jpeg):
         import numpy as np
 
-        for i, jpeg in enumerate(frames):
-            image = self.cv2.imdecode(
-                np.frombuffer(jpeg, dtype=np.uint8), self.cv2.IMREAD_COLOR
-            )
-            if image is None or image.shape != (self.height, self.width, 3):
-                raise ValueError("rendered dimensions mismatch")
-            while not cancel.is_set() and not self.closed.is_set():
-                try:
-                    self.packets.put(
-                        (image, pcm[i * 1280 : (i + 1) * 1280]), timeout=0.1
-                    )
-                    break
-                except queue.Full:
-                    pass
-            else:
-                raise RuntimeError("render cancelled")
+        image = self.cv2.imdecode(
+            np.frombuffer(jpeg, dtype=np.uint8), self.cv2.IMREAD_COLOR
+        )
+        if image is None or image.shape != (self.height, self.width, 3):
+            raise ValueError("rendered dimensions mismatch")
+        return image
 
     def drain(self, cancel):
         while self.packets.unfinished_tasks:
@@ -255,13 +266,18 @@ class LiveOutput:
         index = 0
         capture = None
         deadline = time.monotonic()
+        segment = None
         try:
             while not cancel.is_set() and not self.closed.is_set():
-                speaking = False
-                try:
-                    image, audio = self.packets.get_nowait()
-                    speaking = True
-                except queue.Empty:
+                if segment is None:
+                    try:
+                        segment = self.packets.get_nowait()
+                    except queue.Empty:
+                        pass
+                if segment is not None:
+                    jpeg, audio = segment.popleft()
+                    image = self.decode_frame(jpeg)
+                else:
                     if capture is None:
                         capture = self.cv2.VideoCapture(str(self.paths[index]))
                     ok, image = capture.read()
@@ -275,7 +291,8 @@ class LiveOutput:
                 self._write(self.video, image.tobytes())
                 deadline += 0.04
                 cancel.wait(max(0, deadline - time.monotonic()))
-                if speaking:
+                if segment is not None and not segment:
+                    segment = None
                     self.packets.task_done()
                 if time.monotonic() - deadline > 1:
                     deadline = time.monotonic()

@@ -4,6 +4,7 @@ import base64
 import hashlib
 import json
 import math
+import queue
 import os
 import re
 import tempfile
@@ -100,6 +101,41 @@ class MuseEngine:
         return dict(ready=True, lookId=look, sha256=sha)
 
     def windows(self, text, voice):
+        # Keep reading the next audio windows while GPU rendering uses this one.
+        pending = queue.Queue(maxsize=2)
+        stopped = threading.Event()
+
+        def publish(value):
+            while not stopped.is_set():
+                try:
+                    pending.put(value, timeout=0.2)
+                    return True
+                except queue.Full:
+                    pass
+            return False
+
+        def produce():
+            try:
+                for window in self._read_windows(text, voice):
+                    if not publish(window):
+                        return
+                publish(None)
+            except Exception as error:
+                publish(error)
+
+        threading.Thread(target=produce, daemon=True).start()
+        try:
+            while True:
+                value = pending.get(timeout=95)
+                if value is None:
+                    return
+                if isinstance(value, Exception):
+                    raise value
+                yield value
+        finally:
+            stopped.set()
+
+    def _read_windows(self, text, voice):
         import numpy as np
 
         from services.lipsync.audio_windows import AudioWindows
